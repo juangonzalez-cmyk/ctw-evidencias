@@ -51,6 +51,10 @@ export default defineConfig(({ mode }) => ({
       registerType: "autoUpdate",
       includeAssets: [
         "favicon.ico",
+        "favicon-16.png",
+        "favicon-32.png",
+        "favicon-48.png",
+        "favicon-64.png",
         "apple-touch-icon.png",
         "apple-touch-icon-120.png",
         "apple-touch-icon-152.png",
@@ -78,25 +82,25 @@ export default defineConfig(({ mode }) => ({
         categories: ["business", "productivity"],
         icons: [
           {
-            src: "/pwa-192.png?v=4",
+            src: "/pwa-192.png?v=5",
             sizes: "192x192",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "/pwa-512.png?v=4",
+            src: "/pwa-512.png?v=5",
             sizes: "512x512",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "/pwa-192-maskable.png?v=4",
+            src: "/pwa-192-maskable.png?v=5",
             sizes: "192x192",
             type: "image/png",
             purpose: "maskable",
           },
           {
-            src: "/pwa-512-maskable.png?v=4",
+            src: "/pwa-512-maskable.png?v=5",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",
