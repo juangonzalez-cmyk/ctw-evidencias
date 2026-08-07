@@ -61,14 +61,17 @@ import {
 } from "@/lib/fases";
 import { downloadAllEvidencias, type DownloadProgress } from "@/lib/downloadEvidencias";
 import {
+  STAND_DATETIME_STEP_SECONDS,
   formatEntregaBogota,
   fromDatetimeLocalValue,
   hasRequiredEvidence,
   isStandRecepcion,
   isStandRecepcionComplete,
+  snapDatetimeLocalToHalfHour,
   statusForStandProgress,
   toDatetimeLocalValue,
 } from "@/lib/standRecepcion";
+import { assertStandEntregasAvailable } from "@/lib/upload";
 
 // Cutoff: tasks created after this timestamp are considered "manually added"
 // by the coordinator (vs. originally seeded).
@@ -535,6 +538,18 @@ export const SponsorCompliance = () => {
           | string
           | null,
       };
+      try {
+        await assertStandEntregasAvailable(
+          t.event_id,
+          t.id,
+          merged.entrega_ctw_at,
+          merged.entrega_sponsor_at
+        );
+      } catch (err: any) {
+        setBusyId(null);
+        toast.error(err?.message || "Horario de stand no válido");
+        return;
+      }
       const next = statusForStandProgress(merged);
       if (t.status === STATUS.APPROVED && isStandRecepcionComplete(merged) && !file) {
         finalUpdates.status = STATUS.APPROVED;
@@ -1722,6 +1737,8 @@ const EditBenefitDialog = ({
     if (!tipo.trim()) { toast.error("El tipo de beneficio es obligatorio"); return; }
     if (!responsable.trim()) { toast.error("El responsable es obligatorio"); return; }
     if (!fase) { toast.error("La fase es obligatoria"); return; }
+    const ctwIso = isStandRecepcion(task) ? fromDatetimeLocalValue(entregaCtw) : null;
+    const sponsorIso = isStandRecepcion(task) ? fromDatetimeLocalValue(entregaSponsor) : null;
     onSave({
       tipo_beneficio: tipo.trim(),
       dia: dia.trim() || null,
@@ -1734,8 +1751,8 @@ const EditBenefitDialog = ({
       tipo_entrega: tipoEntrega,
       ...(isStandRecepcion(task)
         ? {
-            entrega_ctw_at: fromDatetimeLocalValue(entregaCtw),
-            entrega_sponsor_at: fromDatetimeLocalValue(entregaSponsor),
+            entrega_ctw_at: ctwIso,
+            entrega_sponsor_at: sponsorIso,
           }
         : {}),
     } as any, newFile);
@@ -1846,6 +1863,9 @@ const EditBenefitDialog = ({
               <div className="text-[11px] uppercase font-bold text-muted-foreground tracking-wider">
                 Recepción de stand
               </div>
+              <p className="text-[10px] text-muted-foreground">
+                Horarios cada 30 min. No pueden coincidir con otro stand.
+              </p>
               {task.acta_recepcion_url && (
                 <a
                   href={task.acta_recepcion_url}
@@ -1861,15 +1881,17 @@ const EditBenefitDialog = ({
                 <Field label="Entrega a Colombia Tech">
                   <Input
                     type="datetime-local"
+                    step={STAND_DATETIME_STEP_SECONDS}
                     value={entregaCtw}
-                    onChange={(e) => setEntregaCtw(e.target.value)}
+                    onChange={(e) => setEntregaCtw(snapDatetimeLocalToHalfHour(e.target.value))}
                   />
                 </Field>
                 <Field label="Entrega al sponsor">
                   <Input
                     type="datetime-local"
+                    step={STAND_DATETIME_STEP_SECONDS}
                     value={entregaSponsor}
-                    onChange={(e) => setEntregaSponsor(e.target.value)}
+                    onChange={(e) => setEntregaSponsor(snapDatetimeLocalToHalfHour(e.target.value))}
                   />
                 </Field>
               </div>

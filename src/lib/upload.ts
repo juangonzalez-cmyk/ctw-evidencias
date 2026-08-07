@@ -1,6 +1,9 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
   FLUJO_STAND_RECEPCION,
+  assertHalfHourStandSlot,
+  findStandEntregaConflicts,
+  formatStandConflictMessage,
   statusForStandProgress,
 } from "@/lib/standRecepcion";
 
@@ -109,6 +112,7 @@ async function deleteStorageObject(urlOrPath: string | null | undefined) {
 
 type TaskStandFields = {
   flujo: string | null;
+  event_id: string | null;
   evidencia_url: string | null;
   acta_recepcion_url: string | null;
   entrega_ctw_at: string | null;
@@ -118,7 +122,7 @@ type TaskStandFields = {
 async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | null> {
   const { data, error } = await supabase
     .from("tasks")
-    .select("flujo, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at")
+    .select("flujo, event_id, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at")
     .eq("id", taskId)
     .maybeSingle();
   if (error) {
@@ -126,6 +130,33 @@ async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | n
     return null;
   }
   return data as TaskStandFields | null;
+}
+
+export async function assertStandEntregasAvailable(
+  eventId: string,
+  taskId: string,
+  entregaCtwAt: string | null,
+  entregaSponsorAt: string | null
+) {
+  assertHalfHourStandSlot(entregaCtwAt, "Entrega a Colombia Tech");
+  assertHalfHourStandSlot(entregaSponsorAt, "Entrega al sponsor");
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("id, marca, tipo_beneficio, entrega_ctw_at, entrega_sponsor_at, deleted_at")
+    .eq("event_id", eventId)
+    .eq("flujo", FLUJO_STAND_RECEPCION)
+    .is("deleted_at", null);
+
+  if (error) throw error;
+
+  const conflict = findStandEntregaConflicts({
+    currentTaskId: taskId,
+    entregaCtwAt,
+    entregaSponsorAt,
+    others: data ?? [],
+  });
+  if (conflict) throw new Error(formatStandConflictMessage(conflict));
 }
 
 function resolveStatusAfterPhoto(
@@ -321,9 +352,20 @@ export async function updateStandEntregas(
   entregaSponsorAt: string | null
 ) {
   const current = await fetchTaskStandFields(taskId);
+  if (!current?.event_id) {
+    throw new Error("No se encontró el beneficio de stand");
+  }
+
+  await assertStandEntregasAvailable(
+    current.event_id,
+    taskId,
+    entregaCtwAt,
+    entregaSponsorAt
+  );
+
   const patch = {
-    evidencia_url: current?.evidencia_url ?? null,
-    acta_recepcion_url: current?.acta_recepcion_url ?? null,
+    evidencia_url: current.evidencia_url ?? null,
+    acta_recepcion_url: current.acta_recepcion_url ?? null,
     entrega_ctw_at: entregaCtwAt,
     entrega_sponsor_at: entregaSponsorAt,
   };
@@ -333,7 +375,7 @@ export async function updateStandEntregas(
     edited_at: new Date().toISOString(),
   };
 
-  if (current?.flujo === FLUJO_STAND_RECEPCION) {
+  if (current.flujo === FLUJO_STAND_RECEPCION) {
     const nextStatus = statusForStandProgress(patch);
     updates.status = nextStatus;
     updates.rejected_at = null;

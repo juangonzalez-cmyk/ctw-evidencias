@@ -37,12 +37,14 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StandRecepcionModal } from "@/components/StandRecepcionModal";
 import {
+  STAND_DATETIME_STEP_SECONDS,
   formatEntregaBogota,
   fromDatetimeLocalValue,
   hasActaRecepcion,
   hasPhotoEvidence,
   isStandRecepcion,
   isStandRecepcionComplete,
+  snapDatetimeLocalToHalfHour,
   toDatetimeLocalValue,
 } from "@/lib/standRecepcion";
 
@@ -472,13 +474,17 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
             Horarios de entrega
           </p>
+          <p className="text-[10px] text-muted-foreground">
+            Solo cada 30 minutos. Dos stands no pueden compartir la misma hora (CTW o sponsor).
+          </p>
           <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">Entrega a Colombia Tech</span>
             <input
               type="datetime-local"
               data-stand-field="ctw"
+              step={STAND_DATETIME_STEP_SECONDS}
               value={ctwLocal}
-              onChange={(e) => setCtwLocal(e.target.value)}
+              onChange={(e) => setCtwLocal(snapDatetimeLocalToHalfHour(e.target.value))}
               className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
             />
           </label>
@@ -487,8 +493,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
             <input
               type="datetime-local"
               data-stand-field="sponsor"
+              step={STAND_DATETIME_STEP_SECONDS}
               value={sponsorLocal}
-              onChange={(e) => setSponsorLocal(e.target.value)}
+              onChange={(e) => setSponsorLocal(snapDatetimeLocalToHalfHour(e.target.value))}
               className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
             />
           </label>
