@@ -252,6 +252,7 @@ export type Database = {
           template_id: string;
           prompt: string;
           question_type: string;
+          options: Json;
           required: boolean;
           sort_order: number;
           active: boolean;
@@ -262,6 +263,7 @@ export type Database = {
           template_id: string;
           prompt: string;
           question_type?: string;
+          options?: Json;
           required?: boolean;
           sort_order?: number;
           active?: boolean;
@@ -272,6 +274,7 @@ export type Database = {
           template_id?: string;
           prompt?: string;
           question_type?: string;
+          options?: Json;
           required?: boolean;
           sort_order?: number;
           active?: boolean;

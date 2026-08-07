@@ -4,15 +4,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { BRAND_GROUPS, unifyBrand } from "@/lib/brands";
 import { FASES, FASE_LABEL, getFase, type Fase } from "@/lib/fases";
 import type { Tables } from "@/integrations/supabase/types";
-import { FileDown, Loader2 } from "lucide-react";
+import { FileDown, Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { buildSponsorEvidencePdf } from "@/lib/buildSponsorPdf";
+import { cn } from "@/lib/utils";
 
 type Task = Tables<"tasks">;
 type Question = Tables<"survey_questions">;
 
 type AnswerMap = Record<string, string | number>;
+
+type StoredAnswer = {
+  question_id: string;
+  prompt: string;
+  question_type: string;
+  value: string | number | null;
+};
 
 function isPublicStorageUrl(url: string) {
   return url.includes("supabase.co") || url.includes("/evidencias/");
@@ -23,6 +31,50 @@ function canShowAsImage(url: string) {
   if (isPublicStorageUrl(url)) return true;
   return /\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(url);
 }
+
+function parseOptions(q: Question): string[] {
+  const raw = q.options as unknown;
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {
+      return raw
+        .split("|")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+  }
+  return [];
+}
+
+const DEFAULT_QUESTIONS = [
+  {
+    prompt: "¿Qué tan satisfecho estás con la entrega de tus beneficios?",
+    question_type: "scale_10",
+    required: true,
+    sort_order: 0,
+  },
+  {
+    prompt: "¿La calidad de las evidencias cumplió tus expectativas?",
+    question_type: "scale_10",
+    required: true,
+    sort_order: 1,
+  },
+  {
+    prompt: "¿Recomendarías patrocinar de nuevo Colombia Tech Week?",
+    question_type: "yes_no",
+    required: true,
+    sort_order: 2,
+  },
+  {
+    prompt: "Comentarios o sugerencias",
+    question_type: "text",
+    required: false,
+    sort_order: 3,
+  },
+];
 
 export default function SponsorReport() {
   const { token } = useParams<{ token: string }>();
@@ -36,6 +88,7 @@ export default function SponsorReport() {
   const [reportId, setReportId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [surveyDone, setSurveyDone] = useState(false);
+  const [savedAnswers, setSavedAnswers] = useState<StoredAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [surveyTitle, setSurveyTitle] = useState("Encuesta de satisfacción");
   const [surveyDesc, setSurveyDesc] = useState("");
@@ -91,37 +144,95 @@ export default function SponsorReport() {
       const mine = (taskRows ?? []).filter((t) => {
         const u = unifyBrand(t.marca).trim().toLowerCase();
         const raw = (t.marca || "").trim().toLowerCase();
-        return variants.has(raw) || u === report.sponsor_unified_name.trim().toLowerCase() || variants.has(u);
+        return (
+          variants.has(raw) ||
+          u === report.sponsor_unified_name.trim().toLowerCase() ||
+          variants.has(u)
+        );
       });
       setTasks(mine);
 
-      const { data: response } = await supabase
-        .from("survey_responses")
-        .select("id")
-        .eq("sponsor_report_id", report.id)
-        .maybeSingle();
-      setSurveyDone(!!response);
-
-      const { data: tpl } = await supabase
+      // Plantilla + preguntas (si no hay, sembrar defaults para no saltarse el gate)
+      let { data: tpl } = await supabase
         .from("survey_templates")
         .select("*")
         .eq("event_id", report.event_id)
         .eq("active", true)
         .maybeSingle();
 
+      if (!tpl) {
+        const { data: created } = await supabase
+          .from("survey_templates")
+          .insert({
+            event_id: report.event_id,
+            title: "Encuesta de satisfacción",
+            description:
+              "Antes de ver el informe de evidencias debes completar esta encuesta.",
+            active: true,
+          })
+          .select("*")
+          .single();
+        tpl = created;
+      }
+
       if (tpl) {
         setSurveyTitle(tpl.title);
-        setSurveyDesc(tpl.description || "");
-        const { data: qs } = await supabase
+        setSurveyDesc(
+          tpl.description ||
+            "Antes de ver el informe de evidencias debes completar esta encuesta."
+        );
+
+        let { data: qs } = await supabase
           .from("survey_questions")
           .select("*")
           .eq("template_id", tpl.id)
           .eq("active", true)
           .order("sort_order", { ascending: true });
-        setQuestions(qs ?? []);
+
+        if (!qs || qs.length === 0) {
+          await supabase.from("survey_questions").insert(
+            DEFAULT_QUESTIONS.map((q) => ({
+              template_id: tpl!.id,
+              ...q,
+              options: [],
+              active: true,
+            }))
+          );
+          const reloaded = await supabase
+            .from("survey_questions")
+            .select("*")
+            .eq("template_id", tpl.id)
+            .eq("active", true)
+            .order("sort_order", { ascending: true });
+          qs = reloaded.data ?? [];
+        }
+        if (!cancelled) setQuestions(qs ?? []);
       }
 
-      setLoading(false);
+      const { data: response } = await supabase
+        .from("survey_responses")
+        .select("id, answers")
+        .eq("sponsor_report_id", report.id)
+        .maybeSingle();
+
+      if (response) {
+        const list = Array.isArray(response.answers)
+          ? (response.answers as StoredAnswer[])
+          : [];
+        // Solo desbloquear si hay respuestas reales (evita bypass con insert vacío)
+        const hasRealAnswers = list.some(
+          (a) => a && a.value !== null && a.value !== undefined && a.value !== ""
+        );
+        if (!cancelled) {
+          setSurveyDone(hasRealAnswers);
+          setSavedAnswers(hasRealAnswers ? list : []);
+        }
+      } else if (!cancelled) {
+        setSurveyDone(false);
+        setSavedAnswers([]);
+      }
+
+      if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -130,9 +241,11 @@ export default function SponsorReport() {
 
   useEffect(() => {
     if (sponsorName) {
-      document.title = `Informe — ${sponsorName} · ${eventName}`;
+      document.title = surveyDone
+        ? `Informe — ${sponsorName} · ${eventName}`
+        : `Encuesta — ${sponsorName} · ${eventName}`;
     }
-  }, [sponsorName, eventName]);
+  }, [sponsorName, eventName, surveyDone]);
 
   const activeTasks = useMemo(
     () => tasks.filter((t) => t.status !== "rechazado"),
@@ -147,7 +260,8 @@ export default function SponsorReport() {
   const allComplete = useMemo(() => {
     if (activeTasks.length === 0) return false;
     return activeTasks.every(
-      (t) => !!t.evidencia_url && (t.status === "aprobada" || t.status === "por_validar")
+      (t) =>
+        !!t.evidencia_url && (t.status === "aprobada" || t.status === "por_validar")
     );
   }, [activeTasks]);
 
@@ -168,6 +282,10 @@ export default function SponsorReport() {
 
   const submitSurvey = async () => {
     if (!reportId || !eventId) return;
+    if (questions.length === 0) {
+      toast.error("La encuesta no tiene preguntas configuradas");
+      return;
+    }
     for (const q of questions) {
       if (q.required && (answers[q.id] === undefined || answers[q.id] === "")) {
         toast.error("Completa todas las preguntas obligatorias");
@@ -175,27 +293,35 @@ export default function SponsorReport() {
       }
     }
     setSubmitting(true);
-    const payload = questions.map((q) => ({
+    const payload: StoredAnswer[] = questions.map((q) => ({
       question_id: q.id,
       prompt: q.prompt,
       question_type: q.question_type,
       value: answers[q.id] ?? null,
     }));
-    const { error } = await supabase.from("survey_responses").insert({
-      event_id: eventId,
-      sponsor_report_id: reportId,
-      answers: payload,
-    });
+    const { error } = await supabase.from("survey_responses").upsert(
+      {
+        event_id: eventId,
+        sponsor_report_id: reportId,
+        answers: payload,
+      },
+      { onConflict: "sponsor_report_id" }
+    );
     setSubmitting(false);
     if (error) {
       toast.error(error.message);
       return;
     }
+    setSavedAnswers(payload);
     setSurveyDone(true);
     toast.success("Gracias. Ya puedes ver el informe.");
   };
 
   const downloadPdf = async () => {
+    if (!surveyDone) {
+      toast.error("Debes completar la encuesta antes de descargar el PDF");
+      return;
+    }
     if (!allApproved) {
       toast.error("El PDF se habilita cuando todos los beneficios están aprobados");
       return;
@@ -206,6 +332,10 @@ export default function SponsorReport() {
         sponsorName,
         eventName,
         tasks: activeTasks,
+        surveyAnswers: savedAnswers.map((a) => ({
+          prompt: a.prompt,
+          value: a.value,
+        })),
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -215,7 +345,7 @@ export default function SponsorReport() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      toast.success("PDF listo — evidencias embebidas");
+      toast.success("PDF listo — encuesta + evidencias");
     } catch (e) {
       console.error(e);
       toast.error("No se pudo generar el PDF");
@@ -245,72 +375,136 @@ export default function SponsorReport() {
     );
   }
 
+  // GATE DURO: sin encuesta respondida no hay informe ni PDF
   if (!surveyDone) {
     return (
       <div className="min-h-screen bg-background">
         <header className="gradient-hero text-white px-5 safe-top pb-8">
           <div className="max-w-lg mx-auto">
-            <div className="text-xs uppercase tracking-[0.2em] text-white/60">Colombia Tech Week</div>
+            <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-white/60">
+              <Lock className="w-3.5 h-3.5" />
+              Colombia Tech Week
+            </div>
             <h1 className="text-2xl font-bold mt-2">{surveyTitle}</h1>
             <p className="text-sm text-white/70 mt-2">
-              {surveyDesc || `Antes de ver el informe de ${sponsorName}, responde esta breve encuesta.`}
+              {surveyDesc ||
+                `Antes de ver el informe de ${sponsorName}, responde esta breve encuesta.`}
+            </p>
+            <p className="text-xs text-primary mt-3 font-semibold">
+              El documento e informe permanecen bloqueados hasta que envíes la encuesta.
             </p>
           </div>
         </header>
         <main className="max-w-lg mx-auto px-5 py-6 space-y-5">
-          {questions.map((q) => (
-            <div key={q.id} className="card-task space-y-2">
-              <div className="text-sm font-semibold">
-                {q.prompt}
-                {q.required && <span className="text-destructive ml-1">*</span>}
+          {questions.map((q) => {
+            const opts = parseOptions(q);
+            return (
+              <div key={q.id} className="card-task space-y-2">
+                <div className="text-sm font-semibold">
+                  {q.prompt}
+                  {q.required && <span className="text-destructive ml-1">*</span>}
+                </div>
+
+                {q.question_type === "scale" && (
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
+                        className={cn(
+                          "flex-1 py-2 rounded-xl text-sm font-bold border",
+                          answers[q.id] === n
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-card border-border"
+                        )}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {q.question_type === "scale_10" && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-5 gap-2">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
+                          className={cn(
+                            "py-2.5 rounded-xl text-sm font-bold border",
+                            answers[q.id] === n
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card border-border"
+                          )}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex justify-between text-[10px] text-muted-foreground px-0.5">
+                      <span>1 · Bajo</span>
+                      <span>10 · Alto</span>
+                    </div>
+                  </div>
+                )}
+
+                {q.question_type === "yes_no" && (
+                  <div className="flex gap-2">
+                    {["Sí", "No"].map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
+                        className={cn(
+                          "flex-1 py-2 rounded-xl text-sm font-bold border",
+                          answers[q.id] === opt
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-card border-border"
+                        )}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {q.question_type === "choice" && (
+                  <div className="space-y-2">
+                    {(opts.length ? opts : ["Opción A", "Opción B"]).map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
+                        className={cn(
+                          "w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold border",
+                          answers[q.id] === opt
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-card border-border"
+                        )}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {q.question_type === "text" && (
+                  <textarea
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm min-h-[88px]"
+                    value={(answers[q.id] as string) || ""}
+                    onChange={(e) =>
+                      setAnswers((a) => ({ ...a, [q.id]: e.target.value }))
+                    }
+                  />
+                )}
               </div>
-              {q.question_type === "scale" && (
-                <div className="flex gap-2">
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
-                      className={`flex-1 py-2 rounded-xl text-sm font-bold border ${
-                        answers[q.id] === n
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card border-border"
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {q.question_type === "yes_no" && (
-                <div className="flex gap-2">
-                  {["Sí", "No"].map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
-                      className={`flex-1 py-2 rounded-xl text-sm font-bold border ${
-                        answers[q.id] === opt
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card border-border"
-                      }`}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {q.question_type === "text" && (
-                <textarea
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm min-h-[88px]"
-                  value={(answers[q.id] as string) || ""}
-                  onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
-                />
-              )}
-            </div>
-          ))}
+            );
+          })}
           <Button className="w-full" onClick={submitSurvey} disabled={submitting}>
-            {submitting ? "Enviando…" : "Enviar y ver informe"}
+            {submitting ? "Enviando…" : "Enviar encuesta y ver informe"}
           </Button>
         </main>
       </div>
@@ -330,12 +524,12 @@ export default function SponsorReport() {
             </p>
           </div>
           <Button
-            onClick={downloadPdf}
+            onClick={() => void downloadPdf()}
             disabled={!allApproved || pdfBusy}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
             title={
               allApproved
-                ? "Descargar PDF"
+                ? "Descargar PDF (incluye encuesta)"
                 : "Disponible cuando todos los beneficios estén aprobados"
             }
           >
@@ -352,8 +546,8 @@ export default function SponsorReport() {
       <main className="max-w-3xl mx-auto px-5 py-8">
         {!allApproved && (
           <div className="mb-6 rounded-xl border border-accent/40 bg-accent/15 px-4 py-3 text-sm">
-            El PDF de entrega (con evidencias embebidas, sin links externos) se habilita cuando
-            todos los beneficios estén aprobados.
+            El PDF de entrega (encuesta + evidencias embebidas) se habilita cuando todos los
+            beneficios estén aprobados.
           </div>
         )}
 
@@ -399,8 +593,7 @@ export default function SponsorReport() {
                             />
                           ) : (
                             <div className="rounded-xl border border-border bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
-                              Evidencia pendiente de materializar en storage público para vista
-                              sin permisos.
+                              Evidencia pendiente de materializar en storage público.
                             </div>
                           )}
                         </div>

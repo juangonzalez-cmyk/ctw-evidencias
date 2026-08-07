@@ -104,12 +104,21 @@ create table if not exists public.survey_questions (
   id uuid primary key default gen_random_uuid(),
   template_id uuid not null references public.survey_templates(id) on delete cascade,
   prompt text not null,
-  question_type text not null default 'scale' check (question_type in ('scale', 'text', 'yes_no')),
+  question_type text not null default 'scale' check (question_type in ('scale', 'scale_10', 'text', 'yes_no', 'choice')),
+  options jsonb not null default '[]'::jsonb,
   required boolean not null default true,
   sort_order int not null default 0,
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+-- Migración segura si la tabla ya existía con el check antiguo
+alter table public.survey_questions drop constraint if exists survey_questions_question_type_check;
+alter table public.survey_questions
+  add constraint survey_questions_question_type_check
+  check (question_type in ('scale', 'scale_10', 'text', 'yes_no', 'choice'));
+alter table public.survey_questions
+  add column if not exists options jsonb not null default '[]'::jsonb;
 
 create index if not exists idx_survey_questions_template on public.survey_questions(template_id);
 

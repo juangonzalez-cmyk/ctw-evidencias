@@ -254,7 +254,10 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
   const [description, setDescription] = useState("");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [newPrompt, setNewPrompt] = useState("");
-  const [newType, setNewType] = useState<"scale" | "text" | "yes_no">("scale");
+  const [newType, setNewType] = useState<"scale" | "scale_10" | "text" | "yes_no" | "choice">(
+    "scale_10"
+  );
+  const [newOptions, setNewOptions] = useState("");
 
   const load = async () => {
     const { data: tpl } = await supabase
@@ -269,7 +272,8 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
         .insert({
           event_id: eventId,
           title: "Encuesta de satisfacción",
-          description: "Antes de ver el informe, responde esta breve encuesta.",
+          description:
+            "Antes de ver el informe de evidencias debes completar esta encuesta.",
         })
         .select()
         .single();
@@ -310,15 +314,29 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
 
   const addQuestion = async () => {
     if (!templateId || !newPrompt.trim()) return;
+    const options =
+      newType === "choice"
+        ? newOptions
+            .split("|")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+    if (newType === "choice" && options.length < 2) {
+      toast.error("Para opción de respuesta escribe al menos 2 opciones separadas por |");
+      return;
+    }
     const { error } = await supabase.from("survey_questions").insert({
       template_id: templateId,
       prompt: newPrompt.trim(),
       question_type: newType,
+      options,
+      required: true,
       sort_order: questions.length,
     });
     if (error) toast.error(error.message);
     else {
       setNewPrompt("");
+      setNewOptions("");
       toast.success("Pregunta agregada");
       await load();
     }
@@ -336,8 +354,21 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
     }
   };
 
+  const typeLabel = (t: string) =>
+    ({
+      scale: "Escala 1–5",
+      scale_10: "Escala 1–10",
+      yes_no: "Sí / No",
+      text: "Texto libre",
+      choice: "Opción de respuesta",
+    }[t] || t);
+
   return (
     <div className="space-y-4">
+      <div className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs">
+        El sponsor <strong>no puede ver ni descargar</strong> el informe hasta enviar la encuesta.
+        Las respuestas se incluyen en el PDF.
+      </div>
       <div className="card-task space-y-3">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título" />
         <Textarea
@@ -357,7 +388,10 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium">{q.prompt}</div>
               <div className="text-[10px] uppercase text-muted-foreground mt-1">
-                {q.question_type}
+                {typeLabel(q.question_type)}
+                {q.question_type === "choice" && Array.isArray(q.options) && q.options.length > 0
+                  ? ` · ${(q.options as string[]).join(" / ")}`
+                  : ""}
               </div>
             </div>
             <Button size="icon" variant="ghost" onClick={() => removeQuestion(q.id)}>
@@ -378,10 +412,19 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
           value={newType}
           onChange={(e) => setNewType(e.target.value as typeof newType)}
         >
+          <option value="scale_10">Escala 1–10</option>
           <option value="scale">Escala 1–5</option>
+          <option value="choice">Opción de respuesta</option>
           <option value="yes_no">Sí / No</option>
           <option value="text">Texto libre</option>
         </select>
+        {newType === "choice" && (
+          <Input
+            placeholder="Opciones separadas por |  ej: Excelente|Bueno|Regular|Malo"
+            value={newOptions}
+            onChange={(e) => setNewOptions(e.target.value)}
+          />
+        )}
         <Button onClick={addQuestion} className="w-full" variant="secondary">
           <Plus className="w-4 h-4 mr-1" /> Agregar pregunta
         </Button>

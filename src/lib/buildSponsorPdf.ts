@@ -14,7 +14,9 @@ function isVideoUrl(url: string) {
   return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
 }
 
-async function urlToDataUrl(url: string): Promise<{ dataUrl: string; format: "PNG" | "JPEG" | "WEBP" } | null> {
+async function urlToDataUrl(
+  url: string
+): Promise<{ dataUrl: string; format: "PNG" | "JPEG" | "WEBP" } | null> {
   try {
     const res = await fetch(url, { mode: "cors" });
     if (!res.ok) return null;
@@ -28,7 +30,6 @@ async function urlToDataUrl(url: string): Promise<{ dataUrl: string; format: "PN
       reader.readAsDataURL(blob);
     });
 
-    // Normalizar a JPEG vía canvas para evitar problemas de formato en jsPDF
     const img = await loadImage(dataUrl);
     const canvas = document.createElement("canvas");
     const maxW = 1600;
@@ -56,15 +57,20 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+export type SurveyAnswerForPdf = {
+  prompt: string;
+  value: string | number | null;
+};
+
 export type BuildPdfOptions = {
   sponsorName: string;
   eventName: string;
   tasks: Task[];
+  surveyAnswers?: SurveyAnswerForPdf[];
 };
 
 /**
- * PDF de entrega: portada + una página por beneficio con la evidencia embebida
- * (sin depender de links externos / permisos de Drive).
+ * PDF de entrega: portada + encuesta respondida + evidencias embebidas.
  */
 export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
@@ -80,7 +86,7 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
   // Portada
   pdf.setFillColor(0, 0, 0);
   pdf.rect(0, 0, pageW, pageH, "F");
-  pdf.setFillColor(150, 230, 49); // CTW green
+  pdf.setFillColor(150, 230, 49);
   pdf.rect(0, 0, pageW, 8, "F");
   pdf.setTextColor(255, 255, 255);
   pdf.setFont("helvetica", "bold");
@@ -101,6 +107,11 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
     margin,
     88
   );
+  if (opts.surveyAnswers && opts.surveyAnswers.length > 0) {
+    pdf.setTextColor(150, 230, 49);
+    pdf.text("Incluye encuesta de satisfacción respondida", margin, 100);
+  }
+  pdf.setTextColor(180, 180, 180);
   pdf.setFontSize(9);
   pdf.text(
     "Las evidencias están embebidas en este PDF. No requiere permisos externos.",
@@ -108,11 +119,58 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
     pageH - 20
   );
 
+  // Encuesta
+  if (opts.surveyAnswers && opts.surveyAnswers.length > 0) {
+    pdf.addPage();
+    pdf.setFillColor(0, 0, 0);
+    pdf.rect(0, 0, pageW, 22, "F");
+    pdf.setFillColor(150, 230, 49);
+    pdf.rect(0, 22, pageW, 1.5, "F");
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.text(opts.sponsorName, margin, 10);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(180, 180, 180);
+    pdf.text("Encuesta de satisfacción", margin, 16);
+
+    pdf.setTextColor(20, 20, 20);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(16);
+    pdf.text("Respuestas de la encuesta", margin, 36);
+
+    let y = 48;
+    for (const a of opts.surveyAnswers) {
+      if (y > pageH - 30) {
+        pdf.addPage();
+        y = 24;
+      }
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(10);
+      pdf.setTextColor(40, 40, 40);
+      const promptLines = pdf.splitTextToSize(a.prompt || "Pregunta", pageW - margin * 2);
+      pdf.text(promptLines, margin, y);
+      y += promptLines.length * 5 + 2;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(12);
+      pdf.setTextColor(0, 0, 0);
+      const val =
+        a.value === null || a.value === undefined || a.value === ""
+          ? "—"
+          : String(a.value);
+      const valLines = pdf.splitTextToSize(val, pageW - margin * 2);
+      pdf.text(valLines, margin, y);
+      y += valLines.length * 6 + 8;
+      pdf.setDrawColor(230, 230, 230);
+      pdf.line(margin, y - 4, pageW - margin, y - 4);
+    }
+  }
+
   for (let i = 0; i < withEvidence.length; i++) {
     const t = withEvidence[i];
     pdf.addPage();
 
-    // Header
     pdf.setFillColor(0, 0, 0);
     pdf.rect(0, 0, pageW, 22, "F");
     pdf.setFillColor(150, 230, 49);
@@ -126,32 +184,23 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
     pdf.setTextColor(180, 180, 180);
     pdf.text(`${i + 1} / ${withEvidence.length}  ·  ${opts.eventName}`, margin, 16);
 
-    // Benefit title
     pdf.setTextColor(20, 20, 20);
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(13);
     const titleLines = pdf.splitTextToSize(t.tipo_beneficio || "Beneficio", pageW - margin * 2);
     pdf.text(titleLines, margin, 32);
 
-    let y = 32 + titleLines.length * 6 + 4;
+    let y = 32 + titleLines.length * 6 + 2;
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(9);
     pdf.setTextColor(90, 90, 90);
-    const meta = [
-      t.marca,
-      t.dia || null,
-      t.hora || null,
-      t.responsable || null,
-    ]
-      .filter(Boolean)
-      .join("  ·  ");
+    const meta = [t.marca, t.dia, t.hora, t.stage, t.speaker].filter(Boolean).join(" · ");
     pdf.text(meta, margin, y);
-    y += 8;
 
-    const url = t.evidencia_url!;
-    const imgAreaTop = y;
-    const imgAreaH = pageH - imgAreaTop - 18;
+    const imgAreaTop = y + 8;
     const imgAreaW = pageW - margin * 2;
+    const imgAreaH = pageH - imgAreaTop - 16;
+    const url = t.evidencia_url!;
 
     if (isVideoUrl(url) || isPdfUrl(url)) {
       pdf.setFillColor(245, 245, 242);
@@ -159,15 +208,18 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
       pdf.setTextColor(40, 40, 40);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(11);
-      pdf.text(isVideoUrl(url) ? "Evidencia en video" : "Evidencia en PDF", margin + 6, imgAreaTop + 16);
+      pdf.text(
+        isVideoUrl(url) ? "Evidencia en video" : "Evidencia en PDF",
+        margin + 6,
+        imgAreaTop + 16
+      );
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(8);
       pdf.setTextColor(100, 100, 100);
       const note = isVideoUrl(url)
-        ? "El video está alojado en el almacenamiento del evento (acceso público del informe)."
+        ? "Video incluido en el almacenamiento del evento."
         : "Documento PDF de soporte incluido en el almacenamiento del evento.";
       pdf.text(pdf.splitTextToSize(note, imgAreaW - 12), margin + 6, imgAreaTop + 24);
-      // Still try thumbnail if somehow image
     } else {
       const embedded = await urlToDataUrl(url);
       if (embedded) {
