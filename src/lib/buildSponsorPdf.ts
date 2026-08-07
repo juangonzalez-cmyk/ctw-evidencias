@@ -274,23 +274,30 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
       const imgAreaH = pageH - imgAreaTop - 16;
       const url = t.evidencia_url!;
 
-      if (isVideoUrl(url) || isPdfUrl(url)) {
+      if (isVideoUrl(url) || isPdfUrl(url) || t.media_type === "link") {
         pdf.setFillColor(245, 245, 242);
         pdf.roundedRect(margin, imgAreaTop, imgAreaW, 40, 3, 3, "F");
         pdf.setTextColor(40, 40, 40);
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(11);
         pdf.text(
-          isVideoUrl(url) ? "Evidencia en video" : "Evidencia en PDF",
+          t.media_type === "link"
+            ? "Evidencia en link"
+            : isVideoUrl(url)
+              ? "Evidencia en video"
+              : "Evidencia en PDF",
           margin + 6,
           imgAreaTop + 16
         );
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(8);
         pdf.setTextColor(100, 100, 100);
-        const note = isVideoUrl(url)
-          ? "Video incluido en el almacenamiento del evento."
-          : "Documento PDF de soporte incluido en el almacenamiento del evento.";
+        const note =
+          t.media_type === "link"
+            ? url
+            : isVideoUrl(url)
+              ? "Video incluido en el almacenamiento del evento."
+              : "Documento PDF de soporte incluido en el almacenamiento del evento.";
         pdf.text(pdf.splitTextToSize(note, imgAreaW - 12), margin + 6, imgAreaTop + 24);
       } else {
         const embedded = await urlToDataUrl(url);

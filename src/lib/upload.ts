@@ -102,6 +102,42 @@ export function isDocumentUrl(url: string | null | undefined): boolean {
   return isPdfUrl(url) || /\.(doc|docx|xls|xlsx|ppt|pptx|csv|txt)(\?|$)/i.test(url);
 }
 
+/** URL http(s) externa usada como evidencia (nota de prensa, Drive, etc.). */
+export function isLinkEvidence(
+  url: string | null | undefined,
+  mediaType?: string | null
+): boolean {
+  if (mediaType === "link") return true;
+  if (!url || !url.trim()) return false;
+  if (isSupabaseEvidencia(url)) return false;
+  if (isImageUrl(url) || isVideoUrl(url) || isDocumentUrl(url)) return false;
+  return /^https?:\/\//i.test(url.trim());
+}
+
+export function normalizeEvidenceLink(raw: string): string {
+  let u = raw.trim();
+  if (!u) throw new Error("Pega un link");
+  if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(u);
+  } catch {
+    throw new Error("Link inválido");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Solo se permiten links http o https");
+  }
+  return parsed.toString();
+}
+
+export function linkDisplayHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "link";
+  }
+}
+
 async function deleteStorageObject(urlOrPath: string | null | undefined) {
   const path = storagePathFromUrl(urlOrPath);
   if (!path) return;
@@ -248,6 +284,40 @@ export async function uploadEvidencia(
   }
 
   return publicUrl;
+}
+
+export async function saveEvidenciaLink(
+  taskId: string,
+  rawUrl: string,
+  uploaderName: string,
+  previousUrl?: string | null
+) {
+  const url = normalizeEvidenceLink(rawUrl);
+  const current = await fetchTaskStandFields(taskId);
+  if (taskIsStandFlow(current)) {
+    throw new Error("En stands la evidencia principal debe ser una foto, no un link.");
+  }
+
+  if (previousUrl && isSupabaseEvidencia(previousUrl)) {
+    await deleteStorageObject(previousUrl);
+  }
+
+  const { error } = await supabase
+    .from("tasks")
+    .update({
+      evidencia_url: url,
+      media_type: "link",
+      subido_por: uploaderName,
+      hora_subida: new Date().toISOString(),
+      status: "por_validar",
+      rejected_at: null,
+      approved_at: null,
+      edited_at: new Date().toISOString(),
+    })
+    .eq("id", taskId);
+
+  if (error) throw error;
+  return url;
 }
 
 export async function removeEvidencia(taskId: string, currentUrl: string | null | undefined) {

@@ -14,6 +14,7 @@ import {
   ExternalLink,
   FileText,
   PenLine,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/hooks/useTasks";
@@ -23,11 +24,14 @@ import {
   removeEvidencia,
   removeActaRecepcion,
   updateStandEntregas,
+  saveEvidenciaLink,
   isSupabaseEvidencia,
   isImageUrl,
   isVideoUrl,
   isPdfUrl,
   isDocumentUrl,
+  isLinkEvidence,
+  linkDisplayHost,
   fileExt,
   EVIDENCIA_ACCEPT,
 } from "@/lib/upload";
@@ -88,6 +92,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [savingBrands, setSavingBrands] = useState(false);
   const [showFirma, setShowFirma] = useState(false);
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [linkDraft, setLinkDraft] = useState("");
+  const [savingLink, setSavingLink] = useState(false);
   const [ctwLocal, setCtwLocal] = useState(() => toDatetimeLocalValue(task.entrega_ctw_at));
   const [sponsorLocal, setSponsorLocal] = useState(() =>
     toDatetimeLocalValue(task.entrega_sponsor_at)
@@ -101,6 +108,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
     task.media_type === "pdf" ||
     task.media_type === "document" ||
     (!!url && isDocumentUrl(url));
+  const isLink = isLinkEvidence(url, task.media_type);
   const late = isLate(task);
   const meta = STATUS_META[task.status] ?? STATUS_META[STATUS.PENDING];
   const approved = task.status === STATUS.APPROVED;
@@ -193,6 +201,28 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
     }
   };
 
+  const handleSaveLink = async () => {
+    setSavingLink(true);
+    try {
+      const subido = relevoOf
+        ? `${uploaderName} (relevo de ${relevoOf})`
+        : uploaderName;
+      await saveEvidenciaLink(task.id, linkDraft, subido, task.evidencia_url);
+      toast.success("Link guardado como evidencia");
+      setShowLinkInput(false);
+      setLinkDraft("");
+      setJustDone(true);
+      setTimeout(() => setJustDone(false), 1200);
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo guardar el link", {
+        description: (err as Error).message,
+      });
+    } finally {
+      setSavingLink(false);
+    }
+  };
+
   const handleSaveTimes = async () => {
     setSavingTimes(true);
     try {
@@ -248,17 +278,27 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
     }
   };
 
-  const busy = uploading || removing || savingTimes;
+  const busy = uploading || removing || savingTimes || savingLink;
   const kindLabel = stand
     ? "Stand"
-    : isVideo
-      ? "Video"
-      : isDoc
-        ? isPdfUrl(url)
-          ? "PDF"
-          : "Documento"
-        : "Foto";
-  const KindIcon = stand ? PenLine : isVideo ? Video : isDoc ? FileText : Camera;
+    : isLink
+      ? "Link"
+      : isVideo
+        ? "Video"
+        : isDoc
+          ? isPdfUrl(url)
+            ? "PDF"
+            : "Documento"
+          : "Foto";
+  const KindIcon = stand
+    ? PenLine
+    : isLink
+      ? Link2
+      : isVideo
+        ? Video
+        : isDoc
+          ? FileText
+          : Camera;
 
   return (
     <div
@@ -300,7 +340,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
                 "inline-flex items-center gap-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
                 stand
                   ? "bg-primary/15 text-primary"
-                  : isVideo
+                  : isLink
+                    ? "bg-emerald-500/15 text-emerald-800"
+                    : isVideo
                     ? "bg-fuchsia-500/15 text-fuchsia-700"
                     : isDoc
                       ? "bg-amber-500/15 text-amber-800"
@@ -398,7 +440,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               playsInline
               className="w-full max-h-48 bg-black object-contain"
             />
-          ) : isImageUrl(url) ? (
+          ) : isImageUrl(url) && !isLink ? (
             <img
               src={url}
               alt={`Evidencia ${task.marca}`}
@@ -412,15 +454,26 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               rel="noreferrer"
               className="flex items-center gap-3 px-4 py-4 text-sm font-medium text-primary hover:bg-muted/50"
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/15 text-amber-800 shrink-0">
-                <FileText className="w-5 h-5" />
+              <span
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-xl shrink-0",
+                  isLink ? "bg-emerald-500/15 text-emerald-800" : "bg-amber-500/15 text-amber-800"
+                )}
+              >
+                {isLink ? <Link2 className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
               </span>
               <span className="min-w-0">
                 <span className="block font-semibold truncate">
-                  {isPdfUrl(url) ? "Documento PDF" : "Documento de soporte"}
+                  {isLink
+                    ? "Link de evidencia"
+                    : isPdfUrl(url)
+                      ? "Documento PDF"
+                      : "Documento de soporte"}
                 </span>
-                <span className="block text-[11px] text-muted-foreground uppercase">
-                  .{fileExt(url) || "archivo"} · tocar para abrir
+                <span className="block text-[11px] text-muted-foreground truncate">
+                  {isLink
+                    ? `${linkDisplayHost(url)} · tocar para abrir`
+                    : `.${fileExt(url) || "archivo"} · tocar para abrir`}
                 </span>
               </span>
               <ExternalLink className="w-4 h-4 shrink-0 ml-auto" />
@@ -432,6 +485,13 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
                 <FileCheck2 className="w-3.5 h-3.5 text-success shrink-0" />
                 <span className="text-muted-foreground">
                   {stand ? "Foto del stand guardada" : "Guardado como archivo en el evento"}
+                </span>
+              </>
+            ) : isLink ? (
+              <>
+                <Link2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                <span className="text-muted-foreground truncate">
+                  Link externo guardado · {linkDisplayHost(url)}
                 </span>
               </>
             ) : (
@@ -665,10 +725,45 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               <FileText className="w-4 h-4" />
               Subir documento (PDF, Word…)
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowLinkInput((v) => !v);
+                setLinkDraft(isLink ? url : "");
+              }}
+              disabled={busy}
+              className="w-full flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
+            >
+              <Link2 className="w-4 h-4" />
+              Pegar link (nota de prensa, Drive…)
+            </button>
+            {showLinkInput && (
+              <div className="space-y-2 rounded-xl border border-border p-3 bg-muted/20">
+                <input
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  placeholder="https://…"
+                  value={linkDraft}
+                  onChange={(e) => setLinkDraft(e.target.value)}
+                  className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveLink()}
+                  disabled={busy || !linkDraft.trim()}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold gradient-primary text-primary-foreground disabled:opacity-50"
+                >
+                  {savingLink ? "Guardando…" : "Guardar link"}
+                </button>
+              </div>
+            )}
           </>
         )}
 
         {!stand && hasEvidence && canEditEvidence && (
+          <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -703,6 +798,18 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
             </button>
             <button
               type="button"
+              onClick={() => {
+                setShowLinkInput((v) => !v);
+                setLinkDraft(url);
+              }}
+              disabled={busy}
+              className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-border disabled:opacity-50"
+              title="Pegar o cambiar link"
+            >
+              <Link2 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
               onClick={() => void handleRemove()}
               disabled={busy}
               className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-50"
@@ -710,6 +817,29 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
             >
               {removing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             </button>
+          </div>
+          {showLinkInput && (
+            <div className="space-y-2 rounded-xl border border-border p-3 bg-muted/20">
+              <input
+                type="url"
+                inputMode="url"
+                autoCapitalize="off"
+                autoCorrect="off"
+                placeholder="https://…"
+                value={linkDraft}
+                onChange={(e) => setLinkDraft(e.target.value)}
+                className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => void handleSaveLink()}
+                disabled={busy || !linkDraft.trim()}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold gradient-primary text-primary-foreground disabled:opacity-50"
+              >
+                {savingLink ? "Guardando…" : "Guardar link"}
+              </button>
+            </div>
+          )}
           </div>
         )}
 

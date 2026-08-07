@@ -597,7 +597,7 @@ export default function SponsorReport() {
                               controls
                               className="w-full rounded-xl max-h-72 bg-black"
                             />
-                          ) : canShowAsImage(t.evidencia_url) ? (
+                          ) : canShowAsImage(t.evidencia_url) && t.media_type !== "link" ? (
                             <img
                               src={t.evidencia_url}
                               alt={t.tipo_beneficio}
@@ -605,9 +605,16 @@ export default function SponsorReport() {
                               crossOrigin="anonymous"
                             />
                           ) : (
-                            <div className="rounded-xl border border-border bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
-                              Evidencia pendiente de materializar en storage público.
-                            </div>
+                            <a
+                              href={t.evidencia_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block rounded-xl border border-border bg-muted/40 px-3 py-3 text-xs text-primary font-semibold truncate"
+                            >
+                              {t.media_type === "link" || !t.evidencia_url.includes("/evidencias/")
+                                ? `Abrir link · ${t.evidencia_url}`
+                                : "Evidencia pendiente de materializar en storage público."}
+                            </a>
                           )}
                         </div>
                       )}
