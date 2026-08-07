@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Task } from "@/hooks/useTasks";
@@ -15,6 +16,10 @@ interface Props {
   onSaved?: () => void;
 }
 
+/**
+ * Popup a pantalla completa en portal (fuera del TaskCard) para que la firma
+ * táctil no choque con scroll ni botones de la app.
+ */
 export function StandRecepcionModal({
   open,
   task,
@@ -26,18 +31,19 @@ export function StandRecepcionModal({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const last = useRef<{ x: number; y: number } | null>(null);
+  const hasStrokeRef = useRef(false);
   const [firmaNombre, setFirmaNombre] = useState(task.firma_nombre || "");
   const [hasStroke, setHasStroke] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const resizeCanvas = useCallback(() => {
+  const paintBlank = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const parent = canvas.parentElement;
     if (!parent) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = parent.clientWidth;
-    const h = Math.max(180, Math.min(280, Math.round(parent.clientWidth * 0.45)));
+    const w = Math.max(1, parent.clientWidth);
+    const h = Math.max(200, Math.min(320, Math.round(w * 0.5)));
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     canvas.width = Math.round(w * dpr);
@@ -48,53 +54,99 @@ export function StandRecepcionModal({
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = "#111111";
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    setHasStroke(false);
   }, []);
+
+  const clearPad = useCallback(() => {
+    hasStrokeRef.current = false;
+    setHasStroke(false);
+    paintBlank();
+  }, [paintBlank]);
 
   useEffect(() => {
     if (!open) return;
     setFirmaNombre(task.firma_nombre || "");
-    const t = window.setTimeout(resizeCanvas, 50);
-    window.addEventListener("resize", resizeCanvas);
-    return () => {
-      window.clearTimeout(t);
-      window.removeEventListener("resize", resizeCanvas);
+    hasStrokeRef.current = false;
+    setHasStroke(false);
+    setSaving(false);
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const t = window.setTimeout(() => paintBlank(), 30);
+    const onOrient = () => {
+      if (!hasStrokeRef.current) paintBlank();
     };
-  }, [open, task.firma_nombre, resizeCanvas]);
+    window.addEventListener("orientationchange", onOrient);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.clearTimeout(t);
+      window.removeEventListener("orientationchange", onOrient);
+    };
+  }, [open, task.id, task.firma_nombre, paintBlank]);
 
   const pointerPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * (canvas.clientWidth || rect.width),
+      y: ((e.clientY - rect.top) / rect.height) * (canvas.clientHeight || rect.height),
+    };
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.setPointerCapture(e.pointerId);
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
     drawing.current = true;
     last.current = pointerPos(e);
+    // punto inicial
+    const ctx = canvas.getContext("2d");
+    if (ctx && last.current) {
+      ctx.beginPath();
+      ctx.fillStyle = "#111111";
+      ctx.arc(last.current.x, last.current.y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      hasStrokeRef.current = true;
+      setHasStroke(true);
+    }
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!drawing.current) return;
+    e.preventDefault();
+    e.stopPropagation();
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || !last.current) return;
     const pos = pointerPos(e);
+    ctx.strokeStyle = "#111111";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     ctx.moveTo(last.current.x, last.current.y);
     ctx.lineTo(pos.x, pos.y);
     ctx.stroke();
     last.current = pos;
-    setHasStroke(true);
+    if (!hasStrokeRef.current) {
+      hasStrokeRef.current = true;
+      setHasStroke(true);
+    }
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     drawing.current = false;
     last.current = null;
     try {
@@ -102,10 +154,6 @@ export function StandRecepcionModal({
     } catch {
       /* ignore */
     }
-  };
-
-  const clearPad = () => {
-    resizeCanvas();
   };
 
   const composeActaBlob = async (): Promise<Blob> => {
@@ -193,11 +241,9 @@ export function StandRecepcionModal({
     ctx.fillStyle = "#fafafa";
     ctx.fillRect(64, y, padW, padH);
 
-    const sigW = sig.width;
-    const sigH = sig.height;
-    const scale = Math.min(padW / sigW, padH / sigH) * 0.92;
-    const dw = sigW * scale;
-    const dh = sigH * scale;
+    const scale = Math.min(padW / sig.clientWidth, padH / sig.clientHeight) * 0.92;
+    const dw = sig.clientWidth * scale;
+    const dh = sig.clientHeight * scale;
     const dx = 64 + (padW - dw) / 2;
     const dy = y + (padH - dh) / 2;
     ctx.drawImage(sig, dx, dy, dw, dh);
@@ -230,7 +276,7 @@ export function StandRecepcionModal({
       toast.warning("Escribe el nombre de quien firma");
       return;
     }
-    if (!hasStroke) {
+    if (!hasStrokeRef.current && !hasStroke) {
       toast.warning("Pide al sponsor que firme en el recuadro");
       return;
     }
@@ -258,11 +304,19 @@ export function StandRecepcionModal({
     }
   };
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
-    <div className="fixed inset-0 z-[80] bg-background flex flex-col safe-top">
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] flex flex-col bg-background"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Acta de recepción de stand"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      style={{ touchAction: "none" }}
+    >
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border safe-top shrink-0">
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Acta de recepción
@@ -281,7 +335,10 @@ export function StandRecepcionModal({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
+        style={{ touchAction: "pan-y", WebkitOverflowScrolling: "touch" }}
+      >
         <p className="text-sm text-muted-foreground">
           Pasa el teléfono al sponsor para que escriba su nombre y firme con el dedo.
         </p>
@@ -303,6 +360,7 @@ export function StandRecepcionModal({
             placeholder="Nombre completo"
             className="w-full h-12 rounded-xl border border-input bg-background px-3 text-base"
             autoComplete="name"
+            style={{ touchAction: "manipulation" }}
           />
         </label>
 
@@ -315,30 +373,35 @@ export function StandRecepcionModal({
               type="button"
               onClick={clearPad}
               disabled={saving}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground px-2 py-1"
             >
               <RotateCcw className="w-3.5 h-3.5" /> Limpiar
             </button>
           </div>
           <div
             className={cn(
-              "rounded-xl border-2 border-dashed border-border bg-white overflow-hidden touch-none",
+              "rounded-xl border-2 border-dashed border-border bg-white overflow-hidden select-none",
               hasStroke && "border-solid border-primary/40"
             )}
+            style={{ touchAction: "none" }}
           >
             <canvas
               ref={canvasRef}
               className="w-full block cursor-crosshair"
+              style={{ touchAction: "none", display: "block" }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerUp}
             />
           </div>
+          <p className="text-[10px] text-muted-foreground">
+            Dibuja la firma dentro del recuadro blanco.
+          </p>
         </div>
       </div>
 
-      <div className="p-4 border-t border-border flex gap-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="p-4 border-t border-border flex gap-2 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <button
           type="button"
           onClick={onClose}
@@ -357,7 +420,8 @@ export function StandRecepcionModal({
           {saving ? "Guardando…" : "Confirmar firma"}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

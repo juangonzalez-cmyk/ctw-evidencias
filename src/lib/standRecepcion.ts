@@ -18,8 +18,15 @@ export const FLUJO_STAND_RECEPCION = "stand_recepcion";
 export const STAND_ACEPTACION_TEXT =
   "Acepto la recepción del stand de acuerdo a lo establecido.";
 
-export function isStandRecepcion(task: { flujo?: string | null }): boolean {
-  return task.flujo === FLUJO_STAND_RECEPCION;
+export function isStandRecepcion(task: {
+  flujo?: string | null;
+  tipo_beneficio?: string | null;
+  category?: string | null;
+}): boolean {
+  if (task.flujo === FLUJO_STAND_RECEPCION) return true;
+  const tipo = (task.tipo_beneficio || "").toLowerCase();
+  const cat = (task.category || "").toLowerCase();
+  return tipo.includes("stand") || cat.includes("stand");
 }
 
 export function hasPhotoEvidence(task: { evidencia_url?: string | null }): boolean {

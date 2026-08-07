@@ -4,6 +4,7 @@ import {
   assertHalfHourStandSlot,
   findStandEntregaConflicts,
   formatStandConflictMessage,
+  isStandRecepcion,
   statusForStandProgress,
 } from "@/lib/standRecepcion";
 
@@ -113,6 +114,8 @@ async function deleteStorageObject(urlOrPath: string | null | undefined) {
 type TaskStandFields = {
   flujo: string | null;
   event_id: string | null;
+  tipo_beneficio: string | null;
+  category: string | null;
   evidencia_url: string | null;
   acta_recepcion_url: string | null;
   entrega_ctw_at: string | null;
@@ -122,7 +125,9 @@ type TaskStandFields = {
 async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | null> {
   const { data, error } = await supabase
     .from("tasks")
-    .select("flujo, event_id, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at")
+    .select(
+      "flujo, event_id, tipo_beneficio, category, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at"
+    )
     .eq("id", taskId)
     .maybeSingle();
   if (error) {
@@ -130,6 +135,15 @@ async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | n
     return null;
   }
   return data as TaskStandFields | null;
+}
+
+function taskIsStandFlow(t: TaskStandFields | null): boolean {
+  if (!t) return false;
+  return isStandRecepcion({
+    flujo: t.flujo,
+    tipo_beneficio: t.tipo_beneficio,
+    category: t.category,
+  });
 }
 
 export async function assertStandEntregasAvailable(
@@ -163,12 +177,12 @@ function resolveStatusAfterPhoto(
   current: TaskStandFields | null,
   evidenciaUrl: string
 ): string {
-  if (current?.flujo === FLUJO_STAND_RECEPCION) {
+  if (taskIsStandFlow(current)) {
     return statusForStandProgress({
       evidencia_url: evidenciaUrl,
-      acta_recepcion_url: current.acta_recepcion_url,
-      entrega_ctw_at: current.entrega_ctw_at,
-      entrega_sponsor_at: current.entrega_sponsor_at,
+      acta_recepcion_url: current?.acta_recepcion_url ?? null,
+      entrega_ctw_at: current?.entrega_ctw_at ?? null,
+      entrega_sponsor_at: current?.entrega_sponsor_at ?? null,
     });
   }
   return "por_validar";
@@ -242,7 +256,7 @@ export async function removeEvidencia(taskId: string, currentUrl: string | null 
   }
 
   const current = await fetchTaskStandFields(taskId);
-  const isStand = current?.flujo === FLUJO_STAND_RECEPCION;
+  const isStand = taskIsStandFlow(current);
 
   const { error } = await supabase
     .from("tasks")
@@ -305,6 +319,7 @@ export async function uploadActaRecepcion(
   const { error: updateError } = await supabase
     .from("tasks")
     .update({
+      flujo: FLUJO_STAND_RECEPCION,
       acta_recepcion_url: publicUrl,
       firma_nombre: firmaNombre.trim() || null,
       subido_por: uploaderName,
@@ -375,7 +390,11 @@ export async function updateStandEntregas(
     edited_at: new Date().toISOString(),
   };
 
-  if (current.flujo === FLUJO_STAND_RECEPCION) {
+  if (current.flujo !== FLUJO_STAND_RECEPCION && taskIsStandFlow(current)) {
+    updates.flujo = FLUJO_STAND_RECEPCION;
+  }
+
+  if (taskIsStandFlow(current) || updates.flujo === FLUJO_STAND_RECEPCION) {
     const nextStatus = statusForStandProgress(patch);
     updates.status = nextStatus;
     updates.rejected_at = null;
