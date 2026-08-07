@@ -12,11 +12,22 @@ import {
   RefreshCw,
   FileCheck2,
   ExternalLink,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/hooks/useTasks";
 import { STATUS } from "@/hooks/useTasks";
-import { uploadEvidencia, removeEvidencia, isSupabaseEvidencia } from "@/lib/upload";
+import {
+  uploadEvidencia,
+  removeEvidencia,
+  isSupabaseEvidencia,
+  isImageUrl,
+  isVideoUrl,
+  isPdfUrl,
+  isDocumentUrl,
+  fileExt,
+  EVIDENCIA_ACCEPT,
+} from "@/lib/upload";
 import { supabase } from "@/integrations/supabase/client";
 import { useEvent } from "@/context/EventContext";
 import { toast } from "sonner";
@@ -49,14 +60,11 @@ const STATUS_META: Record<string, { label: string; cls: string; icon: string }> 
 
 const isMencionMC = (task: Task) => !!(task.brands && task.brands.length > 0);
 
-const isVideoUrl = (url: string) => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
-const isImageUrl = (url: string) =>
-  /\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(url) || url.includes("/evidencias/");
-
 export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const { event } = useEvent();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
+  const docRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [justDone, setJustDone] = useState(false);
@@ -64,12 +72,17 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [savingBrands, setSavingBrands] = useState(false);
 
-  const isVideo = task.media_type === "video" || (!!task.evidencia_url && isVideoUrl(task.evidencia_url));
+  const url = task.evidencia_url || "";
+  const isVideo = task.media_type === "video" || (!!url && isVideoUrl(url));
+  const isDoc =
+    task.media_type === "pdf" ||
+    task.media_type === "document" ||
+    (!!url && isDocumentUrl(url));
   const late = isLate(task);
   const meta = STATUS_META[task.status] ?? STATUS_META[STATUS.PENDING];
   const approved = task.status === STATUS.APPROVED;
-  const hasEvidence = !!(task.evidencia_url && task.evidencia_url.trim());
-  const storedDoc = isSupabaseEvidencia(task.evidencia_url);
+  const hasEvidence = !!(url && url.trim());
+  const storedDoc = isSupabaseEvidencia(url);
   const canEditEvidence =
     !approved &&
     (task.status === STATUS.PENDING ||
@@ -77,6 +90,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       task.status === STATUS.REVIEW);
   const mencion = isMencionMC(task);
   const mencionComplete = mencion && hasEvidence && (task.captured_brands?.length ?? 0) > 0;
+  const preferVideoCapture = task.media_type === "video";
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -97,7 +111,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       } else {
         setJustDone(true);
         toast.success(hasEvidence ? "Evidencia reemplazada" : "Evidencia guardada", {
-          description: "Quedó como archivo en el almacenamiento del evento",
+          description: file.name,
         });
         setTimeout(() => setJustDone(false), 1200);
       }
@@ -106,8 +120,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       toast.error("Error al subir", { description: (err as Error).message });
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
+      if (cameraRef.current) cameraRef.current.value = "";
       if (galleryRef.current) galleryRef.current.value = "";
+      if (docRef.current) docRef.current.value = "";
     }
   };
 
@@ -159,6 +174,8 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   };
 
   const busy = uploading || removing;
+  const kindLabel = isVideo ? "Video" : isDoc ? (isPdfUrl(url) ? "PDF" : "Documento") : "Foto";
+  const KindIcon = isVideo ? Video : isDoc ? FileText : Camera;
 
   return (
     <div
@@ -168,9 +185,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       )}
     >
       <input
-        ref={fileRef}
+        ref={cameraRef}
         type="file"
-        accept={isVideo ? "video/*" : "image/*"}
+        accept={preferVideoCapture ? "video/*" : "image/*"}
         capture="environment"
         onChange={handleFile}
         className="hidden"
@@ -178,7 +195,14 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       <input
         ref={galleryRef}
         type="file"
-        accept={isVideo ? "video/*" : "image/*,application/pdf"}
+        accept={preferVideoCapture ? "video/*" : "image/*"}
+        onChange={handleFile}
+        className="hidden"
+      />
+      <input
+        ref={docRef}
+        type="file"
+        accept={EVIDENCIA_ACCEPT}
         onChange={handleFile}
         className="hidden"
       />
@@ -189,11 +213,15 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
             <span
               className={cn(
                 "inline-flex items-center gap-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
-                isVideo ? "bg-fuchsia-500/15 text-fuchsia-700" : "bg-sky-500/15 text-sky-700"
+                isVideo
+                  ? "bg-fuchsia-500/15 text-fuchsia-700"
+                  : isDoc
+                    ? "bg-amber-500/15 text-amber-800"
+                    : "bg-sky-500/15 text-sky-700"
               )}
             >
-              {isVideo ? <Video className="w-3 h-3" /> : <Camera className="w-3 h-3" />}
-              {isVideo ? "Video" : "Foto"}
+              <KindIcon className="w-3 h-3" />
+              {kindLabel}
             </span>
           </div>
           <h3 className="font-bold text-lg leading-tight truncate">{task.marca}</h3>
@@ -257,31 +285,41 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         </div>
       )}
 
-      {/* Vista previa del archivo guardado */}
       {hasEvidence && (
         <div className="mb-3 rounded-xl overflow-hidden border border-border bg-muted/30">
-          {isVideo || (task.evidencia_url && isVideoUrl(task.evidencia_url)) ? (
+          {isVideo ? (
             <video
-              src={task.evidencia_url!}
+              src={url}
               controls
               playsInline
               className="w-full max-h-48 bg-black object-contain"
             />
-          ) : task.evidencia_url && isImageUrl(task.evidencia_url) ? (
+          ) : isImageUrl(url) ? (
             <img
-              src={task.evidencia_url}
+              src={url}
               alt={`Evidencia ${task.marca}`}
               className="w-full max-h-48 object-cover"
               loading="lazy"
             />
           ) : (
             <a
-              href={task.evidencia_url!}
+              href={url}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-2 px-3 py-4 text-sm font-medium text-primary"
+              className="flex items-center gap-3 px-4 py-4 text-sm font-medium text-primary hover:bg-muted/50"
             >
-              <ExternalLink className="w-4 h-4" /> Abrir evidencia
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/15 text-amber-800 shrink-0">
+                <FileText className="w-5 h-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block font-semibold truncate">
+                  {isPdfUrl(url) ? "Documento PDF" : "Documento de soporte"}
+                </span>
+                <span className="block text-[11px] text-muted-foreground uppercase">
+                  .{fileExt(url) || "archivo"} · tocar para abrir
+                </span>
+              </span>
+              <ExternalLink className="w-4 h-4 shrink-0 ml-auto" />
             </a>
           )}
           <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] border-t border-border bg-card">
@@ -289,14 +327,14 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               <>
                 <FileCheck2 className="w-3.5 h-3.5 text-success shrink-0" />
                 <span className="text-muted-foreground">
-                  Guardada como archivo en el evento
+                  Guardado como archivo en el evento
                 </span>
               </>
             ) : (
               <>
                 <ExternalLink className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                 <span className="text-amber-700 dark:text-amber-400">
-                  Link externo — vuelve a subirla para guardarla en CTW
+                  Link externo — vuelve a subirlo para guardarlo en CTW
                 </span>
               </>
             )}
@@ -326,48 +364,59 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
 
       <div className="flex flex-col gap-2 mt-2">
         {!hasEvidence && canEditEvidence && (
-          <div className="flex gap-2">
+          <>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => cameraRef.current?.click()}
+                disabled={busy}
+                className="flex-1 flex items-center justify-center gap-2 font-semibold text-sm py-3 rounded-xl text-primary-foreground gradient-primary disabled:opacity-50 active:scale-95 transition-transform"
+              >
+                {uploading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : task.status === STATUS.REJECTED ? (
+                  <>
+                    <RotateCw className="w-4 h-4" /> Reintentar
+                  </>
+                ) : preferVideoCapture ? (
+                  <>
+                    <Video className="w-4 h-4" /> Grabar
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-4 h-4" /> Tomar foto
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => galleryRef.current?.click()}
+                disabled={busy}
+                className="px-3 py-3 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
+                title="Elegir de galería"
+              >
+                Galería
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
+              onClick={() => docRef.current?.click()}
               disabled={busy}
-              className="flex-1 flex items-center justify-center gap-2 font-semibold text-sm py-3 rounded-xl text-primary-foreground gradient-primary disabled:opacity-50 active:scale-95 transition-transform"
+              className="w-full flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
             >
-              {uploading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : task.status === STATUS.REJECTED ? (
-                <>
-                  <RotateCw className="w-4 h-4" /> Reintentar
-                </>
-              ) : isVideo ? (
-                <>
-                  <Video className="w-4 h-4" /> Grabar
-                </>
-              ) : (
-                <>
-                  <Camera className="w-4 h-4" /> Tomar foto
-                </>
-              )}
+              <FileText className="w-4 h-4" />
+              Subir documento (PDF, Word…)
             </button>
-            <button
-              type="button"
-              onClick={() => galleryRef.current?.click()}
-              disabled={busy}
-              className="px-3 py-3 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
-              title="Elegir de galería"
-            >
-              Galería
-            </button>
-          </div>
+          </>
         )}
 
         {hasEvidence && canEditEvidence && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
+              onClick={() => cameraRef.current?.click()}
               disabled={busy}
-              className="flex-1 flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
+              className="flex-1 min-w-[7rem] flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
             >
               {uploading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -384,6 +433,15 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               className="px-3 py-2.5 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
             >
               Galería
+            </button>
+            <button
+              type="button"
+              onClick={() => docRef.current?.click()}
+              disabled={busy}
+              className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-border disabled:opacity-50"
+              title="Subir documento"
+            >
+              <FileText className="w-4 h-4" />
             </button>
             <button
               type="button"
