@@ -1,0 +1,373 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, RotateCcw, X } from "lucide-react";
+import { toast } from "sonner";
+import type { Task } from "@/hooks/useTasks";
+import { uploadActaRecepcion } from "@/lib/upload";
+import { useEvent } from "@/context/EventContext";
+import { cn } from "@/lib/utils";
+
+interface Props {
+  open: boolean;
+  task: Task;
+  uploaderName: string;
+  onClose: () => void;
+  onSaved?: () => void;
+}
+
+export function StandRecepcionModal({
+  open,
+  task,
+  uploaderName,
+  onClose,
+  onSaved,
+}: Props) {
+  const { event } = useEvent();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  const [firmaNombre, setFirmaNombre] = useState(task.firma_nombre || "");
+  const [hasStroke, setHasStroke] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const resizeCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = parent.clientWidth;
+    const h = Math.max(180, Math.min(280, Math.round(parent.clientWidth * 0.45)));
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = "#111111";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    setHasStroke(false);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setFirmaNombre(task.firma_nombre || "");
+    const t = window.setTimeout(resizeCanvas, 50);
+    window.addEventListener("resize", resizeCanvas);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("resize", resizeCanvas);
+    };
+  }, [open, task.firma_nombre, resizeCanvas]);
+
+  const pointerPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.setPointerCapture(e.pointerId);
+    drawing.current = true;
+    last.current = pointerPos(e);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx || !last.current) return;
+    const pos = pointerPos(e);
+    ctx.beginPath();
+    ctx.moveTo(last.current.x, last.current.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    last.current = pos;
+    setHasStroke(true);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    drawing.current = false;
+    last.current = null;
+    try {
+      canvasRef.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const clearPad = () => {
+    resizeCanvas();
+  };
+
+  const composeActaBlob = async (): Promise<Blob> => {
+    const sig = canvasRef.current;
+    if (!sig) throw new Error("Canvas no disponible");
+
+    const W = 1080;
+    const H = 1520;
+    const out = document.createElement("canvas");
+    out.width = W;
+    out.height = H;
+    const ctx = out.getContext("2d");
+    if (!ctx) throw new Error("No se pudo crear el acta");
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, W, 16);
+    ctx.fillStyle = "#96e631";
+    ctx.fillRect(0, 16, W, 8);
+
+    ctx.fillStyle = "#111111";
+    ctx.font = "bold 36px Helvetica, Arial, sans-serif";
+    ctx.fillText("ACTA DE RECEPCIÓN DE STAND", 64, 90);
+
+    ctx.font = "22px Helvetica, Arial, sans-serif";
+    ctx.fillStyle = "#444444";
+    const eventName = event?.name || event?.short_name || "Colombia Tech Week";
+    ctx.fillText(eventName, 64, 130);
+
+    const fecha = new Date().toLocaleString("es-CO", {
+      timeZone: "America/Bogota",
+      dateStyle: "long",
+      timeStyle: "short",
+    });
+
+    const lines: Array<[string, string]> = [
+      ["Sponsor", task.marca],
+      ["Beneficio", task.tipo_beneficio],
+      ["Firmante", firmaNombre.trim()],
+      ["Fecha de firma", fecha],
+      ["Responsable CTW", uploaderName],
+    ];
+
+    let y = 200;
+    ctx.font = "20px Helvetica, Arial, sans-serif";
+    for (const [label, value] of lines) {
+      ctx.fillStyle = "#888888";
+      ctx.fillText(label.toUpperCase(), 64, y);
+      ctx.fillStyle = "#111111";
+      ctx.font = "bold 28px Helvetica, Arial, sans-serif";
+      const wrapped = wrapText(ctx, value || "—", W - 128);
+      for (const line of wrapped) {
+        y += 36;
+        ctx.fillText(line, 64, y);
+      }
+      y += 28;
+      ctx.font = "20px Helvetica, Arial, sans-serif";
+    }
+
+    y += 20;
+    ctx.fillStyle = "#111111";
+    ctx.font = "bold 22px Helvetica, Arial, sans-serif";
+    ctx.fillText("Declaración", 64, y);
+    y += 36;
+    ctx.font = "22px Helvetica, Arial, sans-serif";
+    ctx.fillStyle = "#333333";
+    const decl =
+      "El firmante confirma haber recibido el stand / espacio asignado en las condiciones acordadas con Colombia Tech Week.";
+    for (const line of wrapText(ctx, decl, W - 128)) {
+      ctx.fillText(line, 64, y);
+      y += 30;
+    }
+
+    y += 40;
+    ctx.fillStyle = "#888888";
+    ctx.font = "18px Helvetica, Arial, sans-serif";
+    ctx.fillText("FIRMA DEL SPONSOR", 64, y);
+    y += 16;
+
+    const padW = W - 128;
+    const padH = 280;
+    ctx.strokeStyle = "#dddddd";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(64, y, padW, padH);
+    ctx.fillStyle = "#fafafa";
+    ctx.fillRect(64, y, padW, padH);
+
+    const sigW = sig.width;
+    const sigH = sig.height;
+    const scale = Math.min(padW / sigW, padH / sigH) * 0.92;
+    const dw = sigW * scale;
+    const dh = sigH * scale;
+    const dx = 64 + (padW - dw) / 2;
+    const dy = y + (padH - dh) / 2;
+    ctx.drawImage(sig, dx, dy, dw, dh);
+
+    y += padH + 48;
+    ctx.strokeStyle = "#cccccc";
+    ctx.beginPath();
+    ctx.moveTo(64, y);
+    ctx.lineTo(64 + 360, y);
+    ctx.stroke();
+    ctx.fillStyle = "#666666";
+    ctx.font = "18px Helvetica, Arial, sans-serif";
+    ctx.fillText(firmaNombre.trim() || "Firmante", 64, y + 28);
+
+    ctx.fillStyle = "#aaaaaa";
+    ctx.font = "16px Helvetica, Arial, sans-serif";
+    ctx.fillText("Colombia Tech Week · Evidencias", 64, H - 40);
+
+    return new Promise((resolve, reject) => {
+      out.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error("No se pudo generar el PNG del acta"))),
+        "image/png",
+        0.95
+      );
+    });
+  };
+
+  const handleConfirm = async () => {
+    if (!firmaNombre.trim()) {
+      toast.warning("Escribe el nombre de quien firma");
+      return;
+    }
+    if (!hasStroke) {
+      toast.warning("Pide al sponsor que firme en el recuadro");
+      return;
+    }
+    setSaving(true);
+    try {
+      const blob = await composeActaBlob();
+      await uploadActaRecepcion(
+        task.id,
+        blob,
+        firmaNombre.trim(),
+        uploaderName,
+        event?.id,
+        task.acta_recepcion_url
+      );
+      toast.success("Acta firmada guardada");
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo guardar el acta", {
+        description: (err as Error).message,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-background flex flex-col safe-top">
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            Acta de recepción
+          </p>
+          <h2 className="font-bold text-base truncate">{task.marca}</h2>
+          <p className="text-xs text-muted-foreground truncate">{task.tipo_beneficio}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving}
+          className="p-2 rounded-xl bg-secondary"
+          aria-label="Cerrar"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Pasa el teléfono al sponsor para que escriba su nombre y firme con el dedo.
+        </p>
+
+        <label className="block space-y-1.5">
+          <span className="text-[11px] font-bold uppercase text-muted-foreground">
+            Nombre del firmante
+          </span>
+          <input
+            value={firmaNombre}
+            onChange={(e) => setFirmaNombre(e.target.value)}
+            placeholder="Nombre completo"
+            className="w-full h-12 rounded-xl border border-input bg-background px-3 text-base"
+            autoComplete="name"
+          />
+        </label>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase text-muted-foreground">
+              Firma
+            </span>
+            <button
+              type="button"
+              onClick={clearPad}
+              disabled={saving}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Limpiar
+            </button>
+          </div>
+          <div
+            className={cn(
+              "rounded-xl border-2 border-dashed border-border bg-white overflow-hidden touch-none",
+              hasStroke && "border-solid border-primary/40"
+            )}
+          >
+            <canvas
+              ref={canvasRef}
+              className="w-full block cursor-crosshair"
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4 border-t border-border flex gap-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving}
+          className="flex-1 py-3 rounded-xl font-semibold bg-secondary text-muted-foreground"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleConfirm()}
+          disabled={saving}
+          className="flex-1 py-3 rounded-xl font-semibold gradient-primary text-primary-foreground disabled:opacity-50 inline-flex items-center justify-center gap-2"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? "Guardando…" : "Confirmar firma"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : ["—"];
+}

@@ -60,6 +60,15 @@ import {
   type FaseFiltro,
 } from "@/lib/fases";
 import { downloadAllEvidencias, type DownloadProgress } from "@/lib/downloadEvidencias";
+import {
+  formatEntregaBogota,
+  fromDatetimeLocalValue,
+  hasRequiredEvidence,
+  isStandRecepcion,
+  isStandRecepcionComplete,
+  statusForStandProgress,
+  toDatetimeLocalValue,
+} from "@/lib/standRecepcion";
 
 // Cutoff: tasks created after this timestamp are considered "manually added"
 // by the coordinator (vs. originally seeded).
@@ -69,10 +78,10 @@ const isManuallyCreated = (t: Task): boolean => {
   try { return new Date(t.created_at).getTime() >= MANUAL_CREATION_CUTOFF; } catch { return false; }
 };
 
-const hasEvidencia = (t: Task) => !!(t.evidencia_url && t.evidencia_url.trim()) && !t.rejected_at;
+const hasEvidencia = (t: Task) => hasRequiredEvidence(t);
 const isApproved = (t: Task) => t.status === STATUS.APPROVED && !t.rejected_at;
 const isReview = (t: Task) =>
-  !!(t.evidencia_url && t.evidencia_url.trim()) && !t.rejected_at && t.status !== STATUS.APPROVED;
+  hasRequiredEvidence(t) && !t.rejected_at && t.status !== STATUS.APPROVED;
 const isDeleted = (t: Task) => !!t.deleted_at;
 
 type SortKey = "sponsor" | "total" | "delivered" | "pending" | "pct" | "owner";
@@ -285,7 +294,7 @@ export const SponsorCompliance = () => {
     if (stageFilter !== "all" && stageOf(t) !== stageFilter) return false;
     if (ownerFilter !== "all" && t.responsable !== ownerFilter) return false;
     if (reviewFilter.length > 0) {
-      const evid = !!(t.evidencia_url && t.evidencia_url.trim());
+      const evid = hasRequiredEvidence({ ...t, rejected_at: null });
       const matches = reviewFilter.some((rv) => {
         if (rv === "review") return evid && !t.rejected_at && t.status === STATUS.REVIEW;
         if (rv === "approved") return evid && !t.rejected_at && t.status === STATUS.APPROVED;
@@ -517,6 +526,25 @@ export const SponsorCompliance = () => {
       }
     }
 
+    if (isStandRecepcion(t)) {
+      const merged = {
+        evidencia_url: (finalUpdates.evidencia_url ?? t.evidencia_url) as string | null,
+        acta_recepcion_url: t.acta_recepcion_url,
+        entrega_ctw_at: (finalUpdates.entrega_ctw_at ?? t.entrega_ctw_at) as string | null,
+        entrega_sponsor_at: (finalUpdates.entrega_sponsor_at ?? t.entrega_sponsor_at) as
+          | string
+          | null,
+      };
+      const next = statusForStandProgress(merged);
+      if (t.status === STATUS.APPROVED && isStandRecepcionComplete(merged) && !file) {
+        finalUpdates.status = STATUS.APPROVED;
+      } else {
+        finalUpdates.status = next;
+        if (next === STATUS.PENDING) finalUpdates.approved_at = null;
+        finalUpdates.rejected_at = null;
+      }
+    }
+
     const { error } = await supabase
       .from("tasks")
       .update({ ...finalUpdates, edited_at: new Date().toISOString() })
@@ -535,21 +563,55 @@ export const SponsorCompliance = () => {
   const faseSuffix = faseFilter === "all" ? "" : `_${faseFilter}`;
 
   const handleExportCsv = () => {
-    const headers = ["Sponsor", "Marca original", "Beneficio", "Fase", "Día", "Hora", "Stage", "Responsable", "Estado", "Aprobada en", "Rechazada en", "Editada en", "URL evidencia"];
+    const headers = [
+      "Sponsor",
+      "Marca original",
+      "Beneficio",
+      "Fase",
+      "Día",
+      "Hora",
+      "Stage",
+      "Responsable",
+      "Estado",
+      "Aprobada en",
+      "Rechazada en",
+      "Editada en",
+      "URL evidencia",
+      "URL acta",
+      "Firmante",
+      "Entrega CTW",
+      "Entrega sponsor",
+    ];
     const lines = [headers.join(",")];
     for (const row of sponsorRows) {
       for (const t of row.tasks) {
         const estado = hasEvidencia(t)
-          ? (isApproved(t) ? "Aprobada" : "Por revisar")
-          : (t.rejected_at ? "Rechazada" : "Pendiente");
-        lines.push([
-          row.sponsor, t.marca, t.tipo_beneficio,
-          FASE_LABEL[getFase(t)],
-          t.dia || "", t.hora || "", stageOf(t),
-          t.responsable || "", estado,
-          formatBogota(t.approved_at), formatBogota(t.rejected_at), formatBogota(t.edited_at),
+          ? t.status === STATUS.APPROVED
+            ? "Aprobada"
+            : "Por revisar"
+          : t.rejected_at
+            ? "Rechazada"
+            : "Pendiente";
+        const csvRow = [
+          row.sponsor,
+          t.marca,
+          t.tipo_beneficio,
+          getFase(t),
+          t.dia || "",
+          t.hora || "",
+          t.stage || "",
+          t.responsable,
+          estado,
+          t.approved_at || "",
+          t.rejected_at || "",
+          t.edited_at || "",
           t.evidencia_url || "",
-        ].map(csvEscape).join(","));
+          t.acta_recepcion_url || "",
+          t.firma_nombre || "",
+          t.entrega_ctw_at || "",
+          t.entrega_sponsor_at || "",
+        ].map((v) => `"${String(v).replace(/"/g, '""')}"`);
+        lines.push(csvRow.join(","));
       }
     }
     const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
@@ -1448,6 +1510,25 @@ const FragmentRow = ({
                             <ExternalLink className="w-3 h-3" /> Ver evidencia{rejected ? " rechazada" : ""}
                           </button>
                         )}
+                        {isStandRecepcion(t) && (
+                          <div className="mt-1.5 space-y-1 text-[11px] text-muted-foreground">
+                            {t.acta_recepcion_url && (
+                              <a
+                                href={t.acta_recepcion_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-primary font-semibold hover:underline"
+                              >
+                                <FileText className="w-3 h-3" /> Acta firmada
+                                {t.firma_nombre ? ` (${t.firma_nombre})` : ""}
+                              </a>
+                            )}
+                            <div>
+                              CTW: {formatEntregaBogota(t.entrega_ctw_at)} · Sponsor:{" "}
+                              {formatEntregaBogota(t.entrega_sponsor_at)}
+                            </div>
+                          </div>
+                        )}
 
                         <div className="flex flex-wrap gap-1.5 mt-2">
                           {!deleted && ok && (
@@ -1571,6 +1652,8 @@ const EditBenefitDialog = ({
   const [responsable, setResponsable] = useState("");
   const [fase, setFase] = useState<Fase>("durante_evento");
   const [tipoEntrega, setTipoEntrega] = useState<"contractual" | "adicional">("contractual");
+  const [entregaCtw, setEntregaCtw] = useState("");
+  const [entregaSponsor, setEntregaSponsor] = useState("");
   const [newFile, setNewFile] = useState<File | null>(null);
   const [newFilePreview, setNewFilePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1586,6 +1669,8 @@ const EditBenefitDialog = ({
       setResponsable(task.responsable || "");
       setFase(getFase(task));
       setTipoEntrega(((task as any).tipo_entrega as "contractual" | "adicional") || "contractual");
+      setEntregaCtw(toDatetimeLocalValue(task.entrega_ctw_at));
+      setEntregaSponsor(toDatetimeLocalValue(task.entrega_sponsor_at));
       setNewFile(null);
       setNewFilePreview(null);
     }
@@ -1647,6 +1732,12 @@ const EditBenefitDialog = ({
       responsable: responsable.trim(),
       fase,
       tipo_entrega: tipoEntrega,
+      ...(isStandRecepcion(task)
+        ? {
+            entrega_ctw_at: fromDatetimeLocalValue(entregaCtw),
+            entrega_sponsor_at: fromDatetimeLocalValue(entregaSponsor),
+          }
+        : {}),
     } as any, newFile);
   };
 
@@ -1750,9 +1841,46 @@ const EditBenefitDialog = ({
             <Textarea value={notas} onChange={(e) => setNotas(e.target.value)} rows={4} />
           </Field>
 
+          {isStandRecepcion(task) && (
+            <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+              <div className="text-[11px] uppercase font-bold text-muted-foreground tracking-wider">
+                Recepción de stand
+              </div>
+              {task.acta_recepcion_url && (
+                <a
+                  href={task.acta_recepcion_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary font-semibold hover:underline"
+                >
+                  <ExternalLink className="w-3 h-3" /> Ver acta firmada
+                  {task.firma_nombre ? ` — ${task.firma_nombre}` : ""}
+                </a>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Field label="Entrega a Colombia Tech">
+                  <Input
+                    type="datetime-local"
+                    value={entregaCtw}
+                    onChange={(e) => setEntregaCtw(e.target.value)}
+                  />
+                </Field>
+                <Field label="Entrega al sponsor">
+                  <Input
+                    type="datetime-local"
+                    value={entregaSponsor}
+                    onChange={(e) => setEntregaSponsor(e.target.value)}
+                  />
+                </Field>
+              </div>
+            </div>
+          )}
+
           {/* EVIDENCIA */}
           <div>
-            <div className="text-[11px] uppercase font-bold text-muted-foreground mb-2 tracking-wider">Evidencia</div>
+            <div className="text-[11px] uppercase font-bold text-muted-foreground mb-2 tracking-wider">
+              {isStandRecepcion(task) ? "Foto del stand" : "Evidencia"}
+            </div>
             <input
               ref={fileInputRef}
               type="file"

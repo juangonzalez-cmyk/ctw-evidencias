@@ -19,6 +19,7 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { hasRequiredEvidence } from "@/lib/standRecepcion";
 
 /**
  * Vista móvil tipo base de datos: lista compacta, filtros en dropdowns,
@@ -132,8 +133,8 @@ export function SponsorsBoard() {
     return active.filter((t) => {
       if (fase !== "all" && getFase(t) !== fase) return false;
       if (owner !== "all" && t.responsable !== owner) return false;
-      if (estado === "pendiente" && t.evidencia_url) return false;
-      if (estado === "con_evidencia" && !t.evidencia_url) return false;
+      if (estado === "pendiente" && hasRequiredEvidence({ ...t, rejected_at: null })) return false;
+      if (estado === "con_evidencia" && !hasRequiredEvidence({ ...t, rejected_at: null })) return false;
       if (estado === "aprobada" && t.status !== STATUS.APPROVED) return false;
       if (fecha === "con" && !(t.dia || t.hora)) return false;
       if (fecha === "sin" && (t.dia || t.hora)) return false;
@@ -165,7 +166,7 @@ export function SponsorsBoard() {
 
   const stats = useMemo(() => {
     const total = active.length;
-    const withEv = active.filter((t) => !!t.evidencia_url).length;
+    const withEv = active.filter((t) => hasRequiredEvidence({ ...t, rejected_at: null })).length;
     const sponsors = new Set(active.map((t) => unifyBrand(t.marca))).size;
     return { total, withEv, sponsors, pending: total - withEv };
   }, [active]);
@@ -340,7 +341,7 @@ export function SponsorsBoard() {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold truncate">{sponsor}</div>
                   <div className="text-[10px] text-muted-foreground">
-                    {items.filter((t) => t.evidencia_url).length}/{items.length} evidencias
+                    {items.filter((t) => hasRequiredEvidence({ ...t, rejected_at: null })).length}/{items.length} evidencias
                   </div>
                 </div>
                 <button
@@ -400,10 +401,12 @@ export function SponsorsBoard() {
                             <span
                               className={cn(
                                 "font-semibold uppercase",
-                                t.evidencia_url ? "text-success" : "text-muted-foreground"
+                                hasRequiredEvidence({ ...t, rejected_at: null })
+                                  ? "text-success"
+                                  : "text-muted-foreground"
                               )}
                             >
-                              {t.evidencia_url
+                              {hasRequiredEvidence({ ...t, rejected_at: null })
                                 ? t.status === STATUS.APPROVED
                                   ? "OK"
                                   : "Subida"

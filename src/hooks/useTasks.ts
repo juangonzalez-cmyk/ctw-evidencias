@@ -73,7 +73,7 @@ export function useAllTasks() {
     const { data, error } = await supabase
       .from("tasks")
       .select(
-        "id,event_id,marca,tipo_beneficio,responsable,dia,hora,fase,status,evidencia_url,media_type,deleted_at,approved_at,rejected_at,edited_at,is_timed,speaker,stage,notas,created_at,updated_at"
+        "id,event_id,marca,tipo_beneficio,responsable,dia,hora,fase,status,evidencia_url,media_type,deleted_at,approved_at,rejected_at,edited_at,is_timed,speaker,stage,notas,created_at,updated_at,flujo,acta_recepcion_url,firma_nombre,entrega_ctw_at,entrega_sponsor_at,tipo_entrega,category"
       )
       .eq("event_id", event.id)
       .limit(2000);

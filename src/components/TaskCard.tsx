@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Camera,
   Video,
@@ -13,6 +13,7 @@ import {
   FileCheck2,
   ExternalLink,
   FileText,
+  PenLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/hooks/useTasks";
@@ -20,6 +21,8 @@ import { STATUS } from "@/hooks/useTasks";
 import {
   uploadEvidencia,
   removeEvidencia,
+  removeActaRecepcion,
+  updateStandEntregas,
   isSupabaseEvidencia,
   isImageUrl,
   isVideoUrl,
@@ -32,6 +35,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useEvent } from "@/context/EventContext";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
+import { StandRecepcionModal } from "@/components/StandRecepcionModal";
+import {
+  formatEntregaBogota,
+  fromDatetimeLocalValue,
+  hasActaRecepcion,
+  hasPhotoEvidence,
+  isStandRecepcion,
+  isStandRecepcionComplete,
+  toDatetimeLocalValue,
+} from "@/lib/standRecepcion";
 
 interface Props {
   task: Task;
@@ -71,7 +84,14 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const [showBrandConfirm, setShowBrandConfirm] = useState(false);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [savingBrands, setSavingBrands] = useState(false);
+  const [showFirma, setShowFirma] = useState(false);
+  const [ctwLocal, setCtwLocal] = useState(() => toDatetimeLocalValue(task.entrega_ctw_at));
+  const [sponsorLocal, setSponsorLocal] = useState(() =>
+    toDatetimeLocalValue(task.entrega_sponsor_at)
+  );
+  const [savingTimes, setSavingTimes] = useState(false);
 
+  const stand = isStandRecepcion(task);
   const url = task.evidencia_url || "";
   const isVideo = task.media_type === "video" || (!!url && isVideoUrl(url));
   const isDoc =
@@ -82,6 +102,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const meta = STATUS_META[task.status] ?? STATUS_META[STATUS.PENDING];
   const approved = task.status === STATUS.APPROVED;
   const hasEvidence = !!(url && url.trim());
+  const hasActa = hasActaRecepcion(task);
   const storedDoc = isSupabaseEvidencia(url);
   const canEditEvidence =
     !approved &&
@@ -90,11 +111,24 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       task.status === STATUS.REVIEW);
   const mencion = isMencionMC(task);
   const mencionComplete = mencion && hasEvidence && (task.captured_brands?.length ?? 0) > 0;
-  const preferVideoCapture = task.media_type === "video";
+  const preferVideoCapture = !stand && task.media_type === "video";
+  const standComplete = stand && isStandRecepcionComplete(task);
+
+  useEffect(() => {
+    const active = document.activeElement?.getAttribute("data-stand-field");
+    if (active === "ctw" || active === "sponsor") return;
+    setCtwLocal(toDatetimeLocalValue(task.entrega_ctw_at));
+    setSponsorLocal(toDatetimeLocalValue(task.entrega_sponsor_at));
+  }, [task.id, task.entrega_ctw_at, task.entrega_sponsor_at]);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (stand && !file.type.startsWith("image/") && !/\.(jpe?g|png|gif|webp|heic)$/i.test(file.name)) {
+      toast.warning("Para stands sube una foto del stand");
+      e.target.value = "";
+      return;
+    }
     setUploading(true);
     try {
       const subido = relevoOf
@@ -110,7 +144,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         });
       } else {
         setJustDone(true);
-        toast.success(hasEvidence ? "Evidencia reemplazada" : "Evidencia guardada", {
+        toast.success(hasEvidence ? "Evidencia reemplazada" : stand ? "Foto del stand guardada" : "Evidencia guardada", {
           description: file.name,
         });
         setTimeout(() => setJustDone(false), 1200);
@@ -138,6 +172,44 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       toast.error("No se pudo quitar", { description: (err as Error).message });
     } finally {
       setRemoving(false);
+    }
+  };
+
+  const handleRemoveActa = async () => {
+    if (approved || !hasActa) return;
+    if (!confirm("¿Quitar el acta firmada? Podrás pedir la firma de nuevo.")) return;
+    setRemoving(true);
+    try {
+      await removeActaRecepcion(task.id, task.acta_recepcion_url);
+      toast.success("Acta eliminada");
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo quitar el acta", { description: (err as Error).message });
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const handleSaveTimes = async () => {
+    setSavingTimes(true);
+    try {
+      const ctw = fromDatetimeLocalValue(ctwLocal);
+      const sp = fromDatetimeLocalValue(sponsorLocal);
+      await updateStandEntregas(task.id, ctw, sp);
+      toast.success("Horarios de entrega guardados");
+      if (ctw && sp && hasPhotoEvidence(task) && hasActa) {
+        setJustDone(true);
+        setTimeout(() => setJustDone(false), 1200);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudieron guardar los horarios", {
+        description: (err as Error).message,
+      });
+      setCtwLocal(toDatetimeLocalValue(task.entrega_ctw_at));
+      setSponsorLocal(toDatetimeLocalValue(task.entrega_sponsor_at));
+    } finally {
+      setSavingTimes(false);
     }
   };
 
@@ -173,9 +245,17 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
     }
   };
 
-  const busy = uploading || removing;
-  const kindLabel = isVideo ? "Video" : isDoc ? (isPdfUrl(url) ? "PDF" : "Documento") : "Foto";
-  const KindIcon = isVideo ? Video : isDoc ? FileText : Camera;
+  const busy = uploading || removing || savingTimes;
+  const kindLabel = stand
+    ? "Stand"
+    : isVideo
+      ? "Video"
+      : isDoc
+        ? isPdfUrl(url)
+          ? "PDF"
+          : "Documento"
+        : "Foto";
+  const KindIcon = stand ? PenLine : isVideo ? Video : isDoc ? FileText : Camera;
 
   return (
     <div
@@ -199,13 +279,15 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         onChange={handleFile}
         className="hidden"
       />
-      <input
-        ref={docRef}
-        type="file"
-        accept={EVIDENCIA_ACCEPT}
-        onChange={handleFile}
-        className="hidden"
-      />
+      {!stand && (
+        <input
+          ref={docRef}
+          type="file"
+          accept={EVIDENCIA_ACCEPT}
+          onChange={handleFile}
+          className="hidden"
+        />
+      )}
 
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1 min-w-0">
@@ -213,11 +295,13 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
             <span
               className={cn(
                 "inline-flex items-center gap-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
-                isVideo
-                  ? "bg-fuchsia-500/15 text-fuchsia-700"
-                  : isDoc
-                    ? "bg-amber-500/15 text-amber-800"
-                    : "bg-sky-500/15 text-sky-700"
+                stand
+                  ? "bg-primary/15 text-primary"
+                  : isVideo
+                    ? "bg-fuchsia-500/15 text-fuchsia-700"
+                    : isDoc
+                      ? "bg-amber-500/15 text-amber-800"
+                      : "bg-sky-500/15 text-sky-700"
               )}
             >
               <KindIcon className="w-3 h-3" />
@@ -285,6 +369,23 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         </div>
       )}
 
+      {stand && (
+        <div className="mb-3 rounded-xl border border-border bg-muted/20 p-3 space-y-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            Checklist de recepción
+          </p>
+          <StandCheck ok={hasEvidence} label="Foto del stand" />
+          <StandCheck ok={hasActa} label="Acta firmada por el sponsor" />
+          <StandCheck ok={!!task.entrega_ctw_at} label="Hora de entrega a Colombia Tech" />
+          <StandCheck ok={!!task.entrega_sponsor_at} label="Hora de entrega al sponsor" />
+          {standComplete && (
+            <p className="text-[11px] font-semibold text-success pt-1">
+              Listo para validación
+            </p>
+          )}
+        </div>
+      )}
+
       {hasEvidence && (
         <div className="mb-3 rounded-xl overflow-hidden border border-border bg-muted/30">
           {isVideo ? (
@@ -327,7 +428,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               <>
                 <FileCheck2 className="w-3.5 h-3.5 text-success shrink-0" />
                 <span className="text-muted-foreground">
-                  Guardado como archivo en el evento
+                  {stand ? "Foto del stand guardada" : "Guardado como archivo en el evento"}
                 </span>
               </>
             ) : (
@@ -340,6 +441,79 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
             )}
           </div>
         </div>
+      )}
+
+      {stand && hasActa && task.acta_recepcion_url && (
+        <div className="mb-3 rounded-xl overflow-hidden border border-border bg-muted/30">
+          <img
+            src={task.acta_recepcion_url}
+            alt={`Acta ${task.marca}`}
+            className="w-full max-h-56 object-contain bg-white"
+            loading="lazy"
+          />
+          <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] border-t border-border bg-card">
+            <span className="text-muted-foreground truncate">
+              Firmó: {task.firma_nombre || "—"}
+            </span>
+            <a
+              href={task.acta_recepcion_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-primary font-semibold"
+            >
+              <ExternalLink className="w-3 h-3" /> Abrir
+            </a>
+          </div>
+        </div>
+      )}
+
+      {stand && canEditEvidence && (
+        <div className="mb-3 space-y-2 rounded-xl border border-border p-3">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            Horarios de entrega
+          </p>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Entrega a Colombia Tech</span>
+            <input
+              type="datetime-local"
+              data-stand-field="ctw"
+              value={ctwLocal}
+              onChange={(e) => setCtwLocal(e.target.value)}
+              className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Entrega al sponsor</span>
+            <input
+              type="datetime-local"
+              data-stand-field="sponsor"
+              value={sponsorLocal}
+              onChange={(e) => setSponsorLocal(e.target.value)}
+              className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void handleSaveTimes()}
+            disabled={busy}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-border bg-card hover:bg-muted disabled:opacity-50"
+          >
+            {savingTimes ? "Guardando…" : "Guardar horarios"}
+          </button>
+          {(task.entrega_ctw_at || task.entrega_sponsor_at) && (
+            <p className="text-[10px] text-muted-foreground">
+              CTW: {formatEntregaBogota(task.entrega_ctw_at)} · Sponsor:{" "}
+              {formatEntregaBogota(task.entrega_sponsor_at)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {stand && !canEditEvidence && (task.entrega_ctw_at || task.entrega_sponsor_at) && (
+        <p className="text-[11px] text-muted-foreground mb-2">
+          CTW: {formatEntregaBogota(task.entrega_ctw_at)} · Sponsor:{" "}
+          {formatEntregaBogota(task.entrega_sponsor_at)}
+        </p>
       )}
 
       {mencion && hasEvidence && !showBrandConfirm && (
@@ -363,7 +537,83 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       )}
 
       <div className="flex flex-col gap-2 mt-2">
-        {!hasEvidence && canEditEvidence && (
+        {stand && canEditEvidence && (
+          <>
+            {!hasEvidence ? (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => cameraRef.current?.click()}
+                  disabled={busy}
+                  className="flex-1 flex items-center justify-center gap-2 font-semibold text-sm py-3 rounded-xl text-primary-foreground gradient-primary disabled:opacity-50 active:scale-95 transition-transform"
+                >
+                  {uploading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Camera className="w-4 h-4" /> Foto del stand
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => galleryRef.current?.click()}
+                  disabled={busy}
+                  className="px-3 py-3 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
+                >
+                  Galería
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => cameraRef.current?.click()}
+                  disabled={busy}
+                  className="flex-1 min-w-[7rem] flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
+                >
+                  {uploading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4" /> Cambiar foto
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRemove()}
+                  disabled={busy}
+                  className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                >
+                  {removing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </button>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowFirma(true)}
+              disabled={busy}
+              className="w-full flex items-center justify-center gap-2 font-semibold text-sm py-3 rounded-xl border border-primary/40 bg-primary/10 text-primary disabled:opacity-50"
+            >
+              <PenLine className="w-4 h-4" />
+              {hasActa ? "Volver a pedir firma" : "Pedir firma al sponsor"}
+            </button>
+            {hasActa && (
+              <button
+                type="button"
+                onClick={() => void handleRemoveActa()}
+                disabled={busy}
+                className="w-full flex items-center justify-center gap-2 text-xs font-semibold py-2 rounded-xl text-destructive"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Quitar acta
+              </button>
+            )}
+          </>
+        )}
+
+        {!stand && !hasEvidence && canEditEvidence && (
           <>
             <div className="flex gap-2">
               <button
@@ -410,7 +660,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           </>
         )}
 
-        {hasEvidence && canEditEvidence && (
+        {!stand && hasEvidence && canEditEvidence && (
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -461,7 +711,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           </p>
         )}
 
-        {!hasEvidence && !canEditEvidence && (
+        {!stand && !hasEvidence && !canEditEvidence && (
           <a
             href={task.evidencia_url || "#"}
             className="flex items-center gap-1.5 text-xs text-primary font-medium px-3 py-2 bg-primary/10 rounded-lg"
@@ -524,6 +774,31 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           <CheckCircle2 className="w-16 h-16 text-white check-burst" />
         </div>
       )}
+
+      <StandRecepcionModal
+        open={showFirma}
+        task={task}
+        uploaderName={
+          relevoOf ? `${uploaderName} (relevo de ${relevoOf})` : uploaderName
+        }
+        onClose={() => setShowFirma(false)}
+      />
     </div>
   );
 };
+
+function StandCheck({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span
+        className={cn(
+          "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold",
+          ok ? "bg-success/20 text-success" : "bg-secondary text-muted-foreground"
+        )}
+      >
+        {ok ? "✓" : "·"}
+      </span>
+      <span className={cn(ok ? "text-foreground" : "text-muted-foreground")}>{label}</span>
+    </div>
+  );
+}

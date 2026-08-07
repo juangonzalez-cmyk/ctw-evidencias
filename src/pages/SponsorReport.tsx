@@ -9,6 +9,11 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { buildSponsorEvidencePdf } from "@/lib/buildSponsorPdf";
 import { cn } from "@/lib/utils";
+import {
+  formatEntregaBogota,
+  hasRequiredEvidence,
+  isStandRecepcion,
+} from "@/lib/standRecepcion";
 
 type Task = Tables<"tasks">;
 type Question = Tables<"survey_questions">;
@@ -253,7 +258,12 @@ export default function SponsorReport() {
   );
 
   const approvedOrEvidence = useMemo(
-    () => activeTasks.filter((t) => !!t.evidencia_url),
+    () =>
+      activeTasks.filter(
+        (t) =>
+          !!t.evidencia_url ||
+          (isStandRecepcion(t) && !!t.acta_recepcion_url)
+      ),
     [activeTasks]
   );
 
@@ -261,13 +271,16 @@ export default function SponsorReport() {
     if (activeTasks.length === 0) return false;
     return activeTasks.every(
       (t) =>
-        !!t.evidencia_url && (t.status === "aprobada" || t.status === "por_validar")
+        hasRequiredEvidence({ ...t, rejected_at: null }) &&
+        (t.status === "aprobada" || t.status === "por_validar")
     );
   }, [activeTasks]);
 
   const allApproved = useMemo(() => {
     if (activeTasks.length === 0) return false;
-    return activeTasks.every((t) => !!t.evidencia_url && t.status === "aprobada");
+    return activeTasks.every(
+      (t) => hasRequiredEvidence({ ...t, rejected_at: null }) && t.status === "aprobada"
+    );
   }, [activeTasks]);
 
   const byFase = useMemo(() => {
@@ -596,6 +609,25 @@ export default function SponsorReport() {
                               Evidencia pendiente de materializar en storage público.
                             </div>
                           )}
+                        </div>
+                      )}
+                      {isStandRecepcion(t) && (
+                        <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                          {t.acta_recepcion_url && (
+                            <img
+                              src={t.acta_recepcion_url}
+                              alt={`Acta ${t.marca}`}
+                              className="w-full rounded-xl max-h-80 object-contain bg-white border border-border"
+                              crossOrigin="anonymous"
+                            />
+                          )}
+                          <div>
+                            Firmante: {t.firma_nombre || "—"}
+                          </div>
+                          <div>
+                            Entrega CTW: {formatEntregaBogota(t.entrega_ctw_at)} · Sponsor:{" "}
+                            {formatEntregaBogota(t.entrega_sponsor_at)}
+                          </div>
                         </div>
                       )}
                     </article>

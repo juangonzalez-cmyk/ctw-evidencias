@@ -42,6 +42,9 @@ type Predef = {
 
 const PREDEF: Predef[] = [
   { key: "pases_generales", label: "Pases generales", extra: "count", defaultN: 1, build: (n) => `Pases generales (${n})` },
+  { key: "stand_2x2", label: "Stand 2x2 (acta de recepción)", build: () => "Stand 2x2" },
+  { key: "stand_3x3", label: "Stand 3x3 (acta de recepción)", build: () => "Stand 3x3" },
+  { key: "stand_4x4", label: "Stand 4x4 (acta de recepción)", build: () => "Stand 4x4" },
   { key: "carrusel", label: "Carrusel digital en colaboración", build: () => "Carrusel digital en colaboración" },
   { key: "desc_entradas", label: "10% descuento en entradas", build: () => "10% descuento en entradas" },
   { key: "desc_addons", label: "Descuento en add-ons", extra: "percent", defaultN: 10, build: (n) => `${n}% de descuento en add-ons` },
@@ -51,6 +54,9 @@ const PREDEF: Predef[] = [
   { key: "post_bienvenida", label: "Post de bienvenida en redes sociales", build: () => "Post de bienvenida en redes sociales" },
   { key: "base_datos", label: "100% acceso a base de datos de registro", build: () => "100% acceso a base de datos de registro" },
 ];
+
+const isStandTipo = (tipo: string, predefKey: string) =>
+  predefKey.startsWith("stand_") || /^Stand\s+\d/i.test(tipo) || /acta de recepción/i.test(tipo);
 
 const ALLOWED_MIME = /^(image\/(jpeg|jpg|png|webp|gif|heic)|video\/(mp4|quicktime|webm)|application\/(pdf|msword|vnd\.ms-excel|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation))|text\/(plain|csv))$/i;
 const MAX_SIZE = 50 * 1024 * 1024;
@@ -253,6 +259,9 @@ export const AddBenefitModal = ({
 
       const status = evidenciaUrl ? "por_validar" : "pendiente";
       const marca = resolveMarca(sponsor.trim());
+      const standFlow = isStandTipo(tipo, predefKey);
+      // Stands: foto sola no alcanza; quedan pendientes hasta acta + horarios
+      const finalStatus = standFlow ? "pendiente" : status;
 
       const { error: insErr } = await supabase.from("tasks").insert({
         id,
@@ -266,7 +275,7 @@ export const AddBenefitModal = ({
         stage: finalStage,
         speaker: speaker.trim() || null,
         notas: notas.trim() || null,
-        status,
+        status: finalStatus,
         evidencia_url: evidenciaUrl,
         hora_subida: evidenciaUrl ? new Date().toISOString() : null,
         media_type: file?.type.startsWith("video")
@@ -276,6 +285,8 @@ export const AddBenefitModal = ({
             : file && !file.type.startsWith("image/")
               ? "document"
               : "photo",
+        flujo: standFlow ? "stand_recepcion" : "simple",
+        category: standFlow ? "Stands" : null,
       });
 
       if (insErr) {

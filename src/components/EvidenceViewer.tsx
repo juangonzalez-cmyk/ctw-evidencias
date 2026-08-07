@@ -177,6 +177,25 @@ export const EvidenceViewer = ({
             {current.stage && <span>🎤 {current.stage}</span>}
             {current.speaker && <span>🗣️ {current.speaker}</span>}
           </DialogDescription>
+          {current.flujo === "stand_recepcion" && (
+            <div className="text-xs text-muted-foreground space-y-1 pt-1">
+              {current.acta_recepcion_url && (
+                <a
+                  href={current.acta_recepcion_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-primary font-semibold hover:underline"
+                >
+                  <ExternalLink className="w-3 h-3" /> Acta firmada
+                  {current.firma_nombre ? ` · ${current.firma_nombre}` : ""}
+                </a>
+              )}
+              <div>
+                CTW: {formatBogota(current.entrega_ctw_at) || "—"} · Sponsor:{" "}
+                {formatBogota(current.entrega_sponsor_at) || "—"}
+              </div>
+            </div>
+          )}
           <div className="pt-1">
             {approved && (
               <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-success/15 text-success">

@@ -1,4 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
+import {
+  FLUJO_STAND_RECEPCION,
+  statusForStandProgress,
+} from "@/lib/standRecepcion";
 
 const BUCKET = "evidencias";
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -103,6 +107,42 @@ async function deleteStorageObject(urlOrPath: string | null | undefined) {
   }
 }
 
+type TaskStandFields = {
+  flujo: string | null;
+  evidencia_url: string | null;
+  acta_recepcion_url: string | null;
+  entrega_ctw_at: string | null;
+  entrega_sponsor_at: string | null;
+};
+
+async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | null> {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("flujo, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (error) {
+    console.warn("No se pudo leer flujo de task:", error.message);
+    return null;
+  }
+  return data as TaskStandFields | null;
+}
+
+function resolveStatusAfterPhoto(
+  current: TaskStandFields | null,
+  evidenciaUrl: string
+): string {
+  if (current?.flujo === FLUJO_STAND_RECEPCION) {
+    return statusForStandProgress({
+      evidencia_url: evidenciaUrl,
+      acta_recepcion_url: current.acta_recepcion_url,
+      entrega_ctw_at: current.entrega_ctw_at,
+      entrega_sponsor_at: current.entrega_sponsor_at,
+    });
+  }
+  return "por_validar";
+}
+
 export async function uploadEvidencia(
   taskId: string,
   file: File,
@@ -140,6 +180,8 @@ export async function uploadEvidencia(
   const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = urlData.publicUrl;
   const mediaType = detectMediaType(file);
+  const current = await fetchTaskStandFields(taskId);
+  const nextStatus = resolveStatusAfterPhoto(current, publicUrl);
 
   const { error: updateError } = await supabase
     .from("tasks")
@@ -148,7 +190,7 @@ export async function uploadEvidencia(
       media_type: mediaType,
       subido_por: uploaderName,
       hora_subida: new Date().toISOString(),
-      status: "por_validar",
+      status: nextStatus,
       rejected_at: null,
       approved_at: null,
       edited_at: new Date().toISOString(),
@@ -168,19 +210,138 @@ export async function removeEvidencia(taskId: string, currentUrl: string | null 
     await deleteStorageObject(currentUrl);
   }
 
+  const current = await fetchTaskStandFields(taskId);
+  const isStand = current?.flujo === FLUJO_STAND_RECEPCION;
+
   const { error } = await supabase
     .from("tasks")
     .update({
       evidencia_url: null,
-      subido_por: null,
-      hora_subida: null,
+      ...(isStand
+        ? {}
+        : {
+            subido_por: null,
+            hora_subida: null,
+            captured_brands: null,
+          }),
       status: "pendiente",
       rejected_at: null,
       approved_at: null,
-      captured_brands: null,
       edited_at: new Date().toISOString(),
     })
     .eq("id", taskId);
 
   if (error) throw error;
+}
+
+export async function uploadActaRecepcion(
+  taskId: string,
+  blob: Blob,
+  firmaNombre: string,
+  uploaderName: string,
+  eventId?: string,
+  previousUrl?: string | null
+) {
+  if (blob.size > MAX_BYTES) {
+    throw new Error("El acta supera 50 MB");
+  }
+
+  if (previousUrl && isSupabaseEvidencia(previousUrl)) {
+    await deleteStorageObject(previousUrl);
+  }
+
+  const folder = eventId ? `${eventId}/${taskId}` : taskId;
+  const path = `${folder}/acta-${Date.now()}.png`;
+
+  const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, blob, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: "image/png",
+  });
+
+  if (uploadError) throw uploadError;
+
+  const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const publicUrl = urlData.publicUrl;
+  const current = await fetchTaskStandFields(taskId);
+  const nextStatus = statusForStandProgress({
+    evidencia_url: current?.evidencia_url ?? null,
+    acta_recepcion_url: publicUrl,
+    entrega_ctw_at: current?.entrega_ctw_at ?? null,
+    entrega_sponsor_at: current?.entrega_sponsor_at ?? null,
+  });
+
+  const { error: updateError } = await supabase
+    .from("tasks")
+    .update({
+      acta_recepcion_url: publicUrl,
+      firma_nombre: firmaNombre.trim() || null,
+      subido_por: uploaderName,
+      hora_subida: new Date().toISOString(),
+      status: nextStatus,
+      rejected_at: null,
+      approved_at: null,
+      edited_at: new Date().toISOString(),
+    })
+    .eq("id", taskId);
+
+  if (updateError) {
+    await deleteStorageObject(path);
+    throw updateError;
+  }
+
+  return publicUrl;
+}
+
+export async function removeActaRecepcion(
+  taskId: string,
+  currentUrl: string | null | undefined
+) {
+  if (currentUrl && isSupabaseEvidencia(currentUrl)) {
+    await deleteStorageObject(currentUrl);
+  }
+
+  const { error } = await supabase
+    .from("tasks")
+    .update({
+      acta_recepcion_url: null,
+      firma_nombre: null,
+      status: "pendiente",
+      approved_at: null,
+      edited_at: new Date().toISOString(),
+    })
+    .eq("id", taskId);
+
+  if (error) throw error;
+}
+
+export async function updateStandEntregas(
+  taskId: string,
+  entregaCtwAt: string | null,
+  entregaSponsorAt: string | null
+) {
+  const current = await fetchTaskStandFields(taskId);
+  const patch = {
+    evidencia_url: current?.evidencia_url ?? null,
+    acta_recepcion_url: current?.acta_recepcion_url ?? null,
+    entrega_ctw_at: entregaCtwAt,
+    entrega_sponsor_at: entregaSponsorAt,
+  };
+  const updates: Record<string, unknown> = {
+    entrega_ctw_at: entregaCtwAt,
+    entrega_sponsor_at: entregaSponsorAt,
+    edited_at: new Date().toISOString(),
+  };
+
+  if (current?.flujo === FLUJO_STAND_RECEPCION) {
+    const nextStatus = statusForStandProgress(patch);
+    updates.status = nextStatus;
+    updates.rejected_at = null;
+    if (nextStatus === "pendiente") updates.approved_at = null;
+  }
+
+  const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);
+
+  if (error) throw error;
+  return updates.status as string | undefined;
 }

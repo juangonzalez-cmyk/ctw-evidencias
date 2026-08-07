@@ -16,6 +16,8 @@ import {
   type FaseFiltro,
 } from "@/lib/fases";
 
+import { hasRequiredEvidence } from "@/lib/standRecepcion";
+
 const STAGE_OPTIONS = ["Main Stage", "Industry Stage", "Workshops", "Sin stage"];
 
 const stageOf = (t: Task): string => {
@@ -23,7 +25,7 @@ const stageOf = (t: Task): string => {
   return s || "Sin stage";
 };
 
-const isPending = (t: Task) => !t.deleted_at && (!(t.evidencia_url && t.evidencia_url.trim()) || !!t.rejected_at);
+const isPending = (t: Task) => !t.deleted_at && (!hasRequiredEvidence(t) || !!t.rejected_at);
 
 function csvEscape(v: any): string {
   const s = v == null ? "" : String(v);

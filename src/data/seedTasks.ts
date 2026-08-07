@@ -14,6 +14,7 @@ export interface SeedTask {
   media_type?: "photo" | "video";
   stage?: string | null;
   brands?: string[];
+  flujo?: "simple" | "stand_recepcion";
 }
 
 const RESP = {
@@ -230,6 +231,7 @@ const danielaStands: SeedTask[] = stands.map(([marca, size]) => ({
   notas: `Tamaño: ${size}`,
   media_type: "photo" as const,
   stage: null,
+  flujo: "stand_recepcion",
 }));
 
 const danielaExperiencias: SeedTask[] = [
