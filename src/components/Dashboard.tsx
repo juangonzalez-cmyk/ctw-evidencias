@@ -5,7 +5,7 @@ import { InstallAppButton } from "./InstallAppButton";
 import { useEvent } from "@/context/EventContext";
 import {
   LogOut,
-  ListChecks,
+  Building2,
   CalendarClock,
   ClipboardCheck,
   BarChart3,
@@ -40,7 +40,7 @@ interface Props {
   onChangeProfile: () => void;
 }
 
-type Tab = "tareas" | "agenda" | "control" | "cumplimiento" | "pendientes" | "config";
+type Tab = "sponsors" | "agenda" | "control" | "cumplimiento" | "pendientes" | "config";
 
 const TabFallback = () => (
   <div className="py-16 flex justify-center">
@@ -50,7 +50,7 @@ const TabFallback = () => (
 
 export const Dashboard = ({ profile, onChangeProfile }: Props) => {
   const { event } = useEvent();
-  const [tab, setTab] = useState<Tab>(profile.is_coordinator ? "cumplimiento" : "tareas");
+  const [tab, setTab] = useState<Tab>(profile.is_coordinator ? "cumplimiento" : "sponsors");
   const isCoord = !!profile.is_coordinator;
   const shellMax = isCoord ? "max-w-3xl" : "max-w-md";
 
@@ -100,8 +100,8 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
             </>
           ) : (
             <>
-              <TabBtn active={tab === "tareas"} onClick={() => setTab("tareas")} icon={<ListChecks className="w-4 h-4" />} label="Tareas" />
-              <TabBtn active={tab === "agenda"} onClick={() => setTab("agenda")} icon={<CalendarClock className="w-4 h-4" />} label="Mi agenda" />
+              <TabBtn active={tab === "sponsors"} onClick={() => setTab("sponsors")} icon={<Building2 className="w-4 h-4" />} label="Sponsors" />
+              <TabBtn active={tab === "agenda"} onClick={() => setTab("agenda")} icon={<CalendarClock className="w-4 h-4" />} label="Agenda" />
             </>
           )}
         </div>
@@ -113,8 +113,10 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
           {tab === "cumplimiento" && isCoord && <SponsorsBoard />}
           {tab === "pendientes" && isCoord && <PendingByResponsible />}
           {tab === "config" && isCoord && <AdminPanel />}
-          {tab === "agenda" && !isCoord && <Agenda responsable={profile.name} />}
-          {tab === "tareas" && !isCoord && (
+          {tab === "agenda" && !isCoord && (
+            <Agenda responsable={profile.name} uploaderName={profile.name} />
+          )}
+          {tab === "sponsors" && !isCoord && (
             <TaskList responsable={profile.name} uploaderName={profile.name} />
           )}
         </Suspense>
