@@ -1,0 +1,2 @@
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ NULL, ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_deleted_at ON public.tasks(deleted_at);
