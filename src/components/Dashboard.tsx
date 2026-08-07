@@ -7,6 +7,7 @@ import { SponsorsBoard } from "./SponsorsBoard";
 import { PendingByResponsible } from "./PendingByResponsible";
 import { AdminPanel } from "./AdminPanel";
 import { ThemeToggle } from "./ThemeToggle";
+import { InstallAppButton } from "./InstallAppButton";
 import { useEvent } from "@/context/EventContext";
 import {
   LogOut,
@@ -53,6 +54,7 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <InstallAppButton variant="icon" className="text-white" />
             <ThemeToggle className="bg-white/10 border-white/15 text-white hover:bg-white/20" />
             <button
               onClick={onChangeProfile}

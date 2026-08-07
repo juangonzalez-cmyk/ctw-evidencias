@@ -33,3 +33,4 @@ lerna-debug.log*
 oauth.json
 .notion/
 
+.env*

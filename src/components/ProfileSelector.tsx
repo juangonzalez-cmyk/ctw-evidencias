@@ -1,6 +1,7 @@
 import type { Profile } from "@/data/profiles";
 import { useEvent } from "@/context/EventContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { InstallAppButton } from "@/components/InstallAppButton";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -51,6 +52,10 @@ export const ProfileSelector = ({ onSelect }: Props) => {
           <p className="text-muted-foreground dark:text-white/70 mt-3 text-sm">
             Selecciona tu perfil para capturar beneficios en el celular.
           </p>
+        </div>
+
+        <div className="mb-6">
+          <InstallAppButton variant="banner" />
         </div>
 
         {events.length > 1 && (

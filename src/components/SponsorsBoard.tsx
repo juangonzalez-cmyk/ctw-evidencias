@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAllTasks, STATUS, type Task } from "@/hooks/useTasks";
 import { useEvent } from "@/context/EventContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,8 +10,10 @@ import { AddBenefitModal } from "@/components/AddBenefitModal";
 import { toast } from "sonner";
 import {
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Link2,
   Loader2,
   Plus,
   Users,
@@ -24,7 +26,7 @@ import { cn } from "@/lib/utils";
  */
 export function SponsorsBoard() {
   const { tasks, loading, refetch } = useAllTasks();
-  const { profiles } = useEvent();
+  const { event, profiles } = useEvent();
 
   const [search, setSearch] = useState("");
   const [fase, setFase] = useState<FaseFiltro>("all");
@@ -36,8 +38,88 @@ export function SponsorsBoard() {
   const [busy, setBusy] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [reportTokens, setReportTokens] = useState<Record<string, string>>({});
 
   const active = useMemo(() => tasks.filter((t) => !t.deleted_at), [tasks]);
+
+  const sponsorNames = useMemo(
+    () => Array.from(new Set(active.map((t) => unifyBrand(t.marca)))).sort((a, b) => a.localeCompare(b, "es")),
+    [active]
+  );
+
+  useEffect(() => {
+    if (!event || sponsorNames.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: existing } = await supabase
+          .from("sponsor_reports")
+          .select("sponsor_unified_name, token")
+          .eq("event_id", event.id);
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const r of existing ?? []) map[r.sponsor_unified_name] = r.token;
+        const missing = sponsorNames.filter((n) => !map[n]);
+        if (missing.length) {
+          const { data: created } = await supabase
+            .from("sponsor_reports")
+            .insert(
+              missing.map((sponsor_unified_name) => ({
+                event_id: event.id,
+                sponsor_unified_name,
+              }))
+            )
+            .select("sponsor_unified_name, token");
+          for (const r of created ?? []) map[r.sponsor_unified_name] = r.token;
+        }
+        setReportTokens(map);
+      } catch (e) {
+        console.error("ensure_sponsor_reports failed", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [event, sponsorNames]);
+
+  const copyReportLink = async (sponsor: string) => {
+    const token = reportTokens[sponsor];
+    if (!token) {
+      toast.error("Aún no hay link — recarga en unos segundos");
+      return;
+    }
+    const url = `${window.location.origin}/informe/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link del informe copiado");
+    } catch {
+      window.prompt("Copia este link del informe:", url);
+    }
+  };
+
+  const openReport = (sponsor: string) => {
+    const token = reportTokens[sponsor];
+    if (!token) {
+      toast.error("Aún no hay link — recarga en unos segundos");
+      return;
+    }
+    window.open(`${window.location.origin}/informe/${token}`, "_blank");
+  };
+
+  const approveTask = async (task: Task) => {
+    setBusy(true);
+    const { error } = await supabase
+      .from("tasks")
+      .update({ status: STATUS.APPROVED, approved_at: new Date().toISOString() })
+      .eq("id", task.id);
+    setBusy(false);
+    if (error) {
+      toast.error("No se pudo aprobar");
+      return;
+    }
+    toast.success("Evidencia aprobada");
+    refetch();
+  };
 
   const owners = useMemo(() => {
     const set = new Set<string>();
@@ -261,6 +343,24 @@ export function SponsorsBoard() {
                     {items.filter((t) => t.evidencia_url).length}/{items.length} evidencias
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void copyReportLink(sponsor)}
+                  className="p-1.5 rounded-lg hover:bg-background text-muted-foreground"
+                  title="Copiar link del informe"
+                  aria-label={`Copiar link informe ${sponsor}`}
+                >
+                  <Link2 className="w-4 h-4" />
+                </button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[10px] px-2 shrink-0"
+                  onClick={() => openReport(sponsor)}
+                >
+                  Ver informe
+                </Button>
               </div>
 
               <ul>
@@ -324,6 +424,7 @@ export function SponsorsBoard() {
                           owners={owners}
                           busy={busy}
                           onSave={saveRow}
+                          onApprove={approveTask}
                         />
                       )}
                     </li>
@@ -379,15 +480,18 @@ function InlineEditor({
   owners,
   busy,
   onSave,
+  onApprove,
 }: {
   task: Task;
   owners: string[];
   busy: boolean;
   onSave: (task: Task, patch: Partial<Task>) => Promise<void>;
+  onApprove: (task: Task) => Promise<void>;
 }) {
   const [responsable, setResponsable] = useState(task.responsable || "");
   const [dia, setDia] = useState(task.dia || "");
   const [hora, setHora] = useState(task.hora || "");
+  const approved = task.status === STATUS.APPROVED;
 
   return (
     <div className="px-3 pb-3 pt-0 space-y-2 bg-muted/20">
@@ -438,21 +542,38 @@ function InlineEditor({
           Ver evidencia
         </a>
       )}
-      <Button
-        size="sm"
-        className="w-full h-9"
-        disabled={busy}
-        onClick={() =>
-          onSave(task, {
-            responsable,
-            dia: dia.trim() || null,
-            hora: hora.trim() || null,
-            is_timed: !!(dia.trim() || hora.trim()),
-          })
-        }
-      >
-        Guardar
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          className="flex-1 h-9"
+          disabled={busy}
+          onClick={() =>
+            onSave(task, {
+              responsable,
+              dia: dia.trim() || null,
+              hora: hora.trim() || null,
+              is_timed: !!(dia.trim() || hora.trim()),
+            })
+          }
+        >
+          Guardar
+        </Button>
+        {task.evidencia_url && !approved && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 shrink-0"
+            disabled={busy}
+            onClick={() => void onApprove(task)}
+          >
+            <CheckCircle2 className="w-4 h-4 mr-1" />
+            Aprobar
+          </Button>
+        )}
+      </div>
+      {approved && (
+        <p className="text-[11px] text-success font-semibold">✓ Aprobada</p>
+      )}
     </div>
   );
 }
