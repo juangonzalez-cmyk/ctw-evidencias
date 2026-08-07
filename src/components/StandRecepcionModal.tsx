@@ -7,6 +7,7 @@ import { uploadActaRecepcion } from "@/lib/upload";
 import { useEvent } from "@/context/EventContext";
 import { cn } from "@/lib/utils";
 import { STAND_ACEPTACION_TEXT } from "@/lib/standRecepcion";
+import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 interface Props {
   open: boolean;
@@ -38,9 +39,13 @@ export function StandRecepcionModal({
 
   const paintBlank = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      return;
+    }
     const parent = canvas.parentElement;
-    if (!parent) return;
+    if (!parent) {
+      return;
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.max(1, parent.clientWidth);
     const h = Math.max(200, Math.min(320, Math.round(w * 0.5)));
@@ -193,7 +198,7 @@ export function StandRecepcionModal({
 
     const lines: Array<[string, string]> = [
       ["Sponsor", task.marca],
-      ["Beneficio", task.tipo_beneficio],
+      ["Beneficio", displayBeneficioLabel(task.tipo_beneficio)],
       ["Firmante", firmaNombre.trim()],
       ["Fecha de firma", fecha],
       ["Responsable CTW", uploaderName],
@@ -322,7 +327,9 @@ export function StandRecepcionModal({
             Acta de recepción
           </p>
           <h2 className="font-bold text-base truncate">{task.marca}</h2>
-          <p className="text-xs text-muted-foreground truncate">{task.tipo_beneficio}</p>
+          <p className="text-xs text-muted-foreground truncate">
+            {displayBeneficioLabel(task.tipo_beneficio)}
+          </p>
         </div>
         <button
           type="button"
@@ -404,7 +411,11 @@ export function StandRecepcionModal({
       <div className="p-4 border-t border-border flex gap-2 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <button
           type="button"
-          onClick={onClose}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }}
           disabled={saving}
           className="flex-1 py-3 rounded-xl font-semibold bg-secondary text-muted-foreground"
         >

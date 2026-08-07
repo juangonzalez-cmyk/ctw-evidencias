@@ -144,8 +144,8 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
                   <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-sm truncate">{sponsor}</div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                  <div className="text-xs font-medium text-muted-foreground truncate">{sponsor}</div>
+                  <div className="text-[10px] text-muted-foreground/80 mt-0.5">
                     {done}/{items.length} listos
                     {pending > 0 ? ` · ${pending} pendientes` : ""}
                   </div>

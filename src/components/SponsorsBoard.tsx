@@ -26,6 +26,7 @@ import {
   isStandRecepcion,
   statusForStandProgress,
 } from "@/lib/standRecepcion";
+import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 /**
  * Vista móvil tipo base de datos: lista compacta, filtros en dropdowns,
@@ -370,8 +371,8 @@ export function SponsorsBoard() {
                   {allOn && <Check className="w-3 h-3" />}
                 </button>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold truncate">{sponsor}</div>
-                  <div className="text-[10px] text-muted-foreground">
+                  <div className="text-xs font-medium text-muted-foreground truncate">{sponsor}</div>
+                  <div className="text-[10px] text-muted-foreground/80">
                     {items.filter((t) => hasRequiredEvidence({ ...t, rejected_at: null })).length}/{items.length} evidencias
                   </div>
                 </div>
@@ -419,8 +420,8 @@ export function SponsorsBoard() {
                           className="flex-1 min-w-0 text-left"
                           onClick={() => setExpandedId(open ? null : t.id)}
                         >
-                          <div className="text-xs font-medium leading-snug line-clamp-2">
-                            {t.tipo_beneficio}
+                          <div className="text-sm font-semibold leading-snug line-clamp-3">
+                            {displayBeneficioLabel(t.tipo_beneficio)}
                           </div>
                           <div className="text-[10px] text-muted-foreground mt-0.5 flex flex-wrap gap-x-2">
                             <span>{t.responsable}</span>

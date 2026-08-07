@@ -47,6 +47,7 @@ import {
   snapDatetimeLocalToHalfHour,
   toDatetimeLocalValue,
 } from "@/lib/standRecepcion";
+import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 interface Props {
   task: Task;
@@ -310,10 +311,10 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               {kindLabel}
             </span>
           </div>
-          <h3 className="font-bold text-lg leading-tight truncate">{task.marca}</h3>
-          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-            {task.tipo_beneficio}
-          </p>
+          <h3 className="font-bold text-base leading-snug line-clamp-3">
+            {displayBeneficioLabel(task.tipo_beneficio)}
+          </h3>
+          <p className="text-xs text-muted-foreground mt-1 truncate">{task.marca}</p>
         </div>
         <span
           className={cn(
