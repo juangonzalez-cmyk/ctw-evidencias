@@ -1,44 +1,19 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-/** Shared across components so the deferred prompt survives navigation. */
+type Listener = () => void;
+
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
 let installedFlag = false;
-let cachedSnap = { deferred: null as BeforeInstallPromptEvent | null, installed: false };
-const listeners = new Set<() => void>();
+let wired = false;
+const listeners = new Set<Listener>();
 
-function refreshSnap() {
-  if (
-    cachedSnap.deferred === deferredPrompt &&
-    cachedSnap.installed === installedFlag
-  ) {
-    return;
-  }
-  cachedSnap = { deferred: deferredPrompt, installed: installedFlag };
-}
-
-function emit() {
-  refreshSnap();
+function notify() {
   listeners.forEach((l) => l());
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-function getSnapshot() {
-  return cachedSnap;
-}
-
-function getServerSnapshot() {
-  return cachedSnap;
 }
 
 function isStandaloneNow() {
@@ -55,61 +30,54 @@ function isIosDevice() {
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
-let wired = false;
 function ensureWired() {
   if (wired || typeof window === "undefined") return;
   wired = true;
   installedFlag = isStandaloneNow();
-  refreshSnap();
 
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e as BeforeInstallPromptEvent;
-    emit();
+    notify();
   });
+
   window.addEventListener("appinstalled", () => {
     installedFlag = true;
     deferredPrompt = null;
-    emit();
+    notify();
   });
-
-  const mq = window.matchMedia("(display-mode: standalone)");
-  const onMode = () => {
-    const next = isStandaloneNow();
-    if (next !== installedFlag) {
-      installedFlag = next;
-      emit();
-    }
-  };
-  mq.addEventListener?.("change", onMode);
 }
 
+/**
+ * Simple subscription hook — avoids useSyncExternalStore snapshot identity bugs
+ * that caused React minified error #185 (infinite update loop).
+ */
 export function usePwaInstall() {
-  ensureWired();
-  const snap = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const [, bump] = useState(0);
   const [iosHint, setIosHint] = useState(false);
   const [manualHint, setManualHint] = useState(false);
   const ios = isIosDevice();
 
   useEffect(() => {
-    const next = isStandaloneNow();
-    if (next !== installedFlag) {
-      installedFlag = next;
-      emit();
-    }
+    ensureWired();
+    installedFlag = isStandaloneNow();
+    const onChange = () => bump((n) => n + 1);
+    listeners.add(onChange);
+    return () => {
+      listeners.delete(onChange);
+    };
   }, []);
 
-  // Show install CTA unless the app is already running as installed PWA
-  const canInstall = !snap.installed;
+  const canInstall = !installedFlag;
 
   const install = useCallback(async () => {
-    if (snap.deferred) {
-      await snap.deferred.prompt();
-      const { outcome } = await snap.deferred.userChoice;
+    if (deferredPrompt) {
+      await deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
       if (outcome === "accepted") {
         installedFlag = true;
         deferredPrompt = null;
-        emit();
+        notify();
       }
       return;
     }
@@ -118,17 +86,17 @@ export function usePwaInstall() {
       return;
     }
     setManualHint(true);
-  }, [snap.deferred, ios]);
+  }, [ios]);
 
   return {
     canInstall,
-    installed: snap.installed,
+    installed: installedFlag,
     install,
     iosHint,
     dismissIosHint: () => setIosHint(false),
     manualHint,
     dismissManualHint: () => setManualHint(false),
     isIos: ios,
-    hasNativePrompt: !!snap.deferred,
+    hasNativePrompt: !!deferredPrompt,
   };
 }
