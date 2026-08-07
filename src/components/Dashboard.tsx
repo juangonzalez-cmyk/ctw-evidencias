@@ -56,7 +56,7 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 gradient-hero text-white px-5 pt-6 pb-3 shadow-lg">
+      <header className="sticky top-0 z-10 gradient-hero text-white safe-x safe-top pb-3 shadow-lg">
         <div className={cn("flex items-center justify-between mx-auto gap-2", shellMax)}>
           <div className="flex items-center gap-3 min-w-0">
             <div

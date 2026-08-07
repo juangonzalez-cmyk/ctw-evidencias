@@ -169,9 +169,21 @@
   animation: pulse-late 2s infinite;
 }
 
+/* PWA / notch: evita que la UI choque con hora, Dynamic Island y home indicator */
+.safe-top {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 1.75rem);
+}
+.safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+}
+.safe-x {
+  padding-left: max(1.25rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
+}
+
 /* Portada: clara en light, hero oscuro en dark */
 .page-home {
-  min-height: 100vh;
+  min-height: 100dvh;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
 }

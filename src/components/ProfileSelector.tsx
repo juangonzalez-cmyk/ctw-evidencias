@@ -31,7 +31,7 @@ export const ProfileSelector = ({ onSelect }: Props) => {
 
   return (
     <div className="page-home">
-      <div className="px-6 pt-10 pb-8 max-w-md mx-auto">
+      <div className="px-6 safe-top pb-8 max-w-md mx-auto">
         <div className="flex justify-end mb-6 gap-2">
           <InstallAppButton
             variant="icon"

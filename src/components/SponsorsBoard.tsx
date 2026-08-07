@@ -437,7 +437,7 @@ export function SponsorsBoard() {
       </div>
 
       {selected.size > 0 && (
-        <div className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-background/95 backdrop-blur p-3">
+        <div className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-background/95 backdrop-blur p-3 safe-bottom">
           <div className="max-w-3xl mx-auto flex gap-2 items-center">
             <Users className="w-4 h-4 text-muted-foreground shrink-0" />
             <select

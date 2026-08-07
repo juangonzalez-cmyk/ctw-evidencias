@@ -62,7 +62,7 @@ const Index = () => {
   if (events.length === 0) {
     return (
       <div className="relative">
-        <div className="absolute top-4 right-4 z-10">
+        <div className="absolute right-4 z-10" style={{ top: "calc(env(safe-area-inset-top, 0px) + 1rem)" }}>
           <ThemeToggle />
         </div>
         <EventCreateWizard

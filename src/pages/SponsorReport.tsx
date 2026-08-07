@@ -248,7 +248,7 @@ export default function SponsorReport() {
   if (!surveyDone) {
     return (
       <div className="min-h-screen bg-background">
-        <header className="gradient-hero text-white px-5 py-8">
+        <header className="gradient-hero text-white px-5 safe-top pb-8">
           <div className="max-w-lg mx-auto">
             <div className="text-xs uppercase tracking-[0.2em] text-white/60">Colombia Tech Week</div>
             <h1 className="text-2xl font-bold mt-2">{surveyTitle}</h1>
@@ -319,7 +319,7 @@ export default function SponsorReport() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="gradient-hero text-white px-5 py-8">
+      <header className="gradient-hero text-white px-5 safe-top pb-8">
         <div className="max-w-3xl mx-auto flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-white/60">{eventName}</div>
