@@ -54,7 +54,7 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <InstallAppButton variant="icon" className="text-white" />
+            <InstallAppButton variant="chip" />
             <ThemeToggle className="bg-white/10 border-white/15 text-white hover:bg-white/20" />
             <button
               onClick={onChangeProfile}
@@ -83,7 +83,11 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
         </div>
       </header>
 
-      <main className={cn("px-4 pt-5 mx-auto pb-10", shellMax)}>
+      <div className={cn("px-4 pt-3 mx-auto", shellMax)}>
+        <InstallAppButton variant="banner" />
+      </div>
+
+      <main className={cn("px-4 pt-4 mx-auto pb-10", shellMax)}>
         {tab === "control" && isCoord && <ControlPanel />}
         {tab === "cumplimiento" && isCoord && <SponsorsBoard />}
         {tab === "pendientes" && isCoord && <PendingByResponsible />}

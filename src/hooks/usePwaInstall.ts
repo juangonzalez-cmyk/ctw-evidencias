@@ -7,20 +7,38 @@ interface BeforeInstallPromptEvent extends Event {
 
 /** Shared across components so the deferred prompt survives navigation. */
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
-let installed = false;
+let installedFlag = false;
+let cachedSnap = { deferred: null as BeforeInstallPromptEvent | null, installed: false };
 const listeners = new Set<() => void>();
 
+function refreshSnap() {
+  if (
+    cachedSnap.deferred === deferredPrompt &&
+    cachedSnap.installed === installedFlag
+  ) {
+    return;
+  }
+  cachedSnap = { deferred: deferredPrompt, installed: installedFlag };
+}
+
 function emit() {
+  refreshSnap();
   listeners.forEach((l) => l());
 }
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 function getSnapshot() {
-  return { deferred: deferredPrompt, installed };
+  return cachedSnap;
+}
+
+function getServerSnapshot() {
+  return cachedSnap;
 }
 
 function isStandaloneNow() {
@@ -41,7 +59,8 @@ let wired = false;
 function ensureWired() {
   if (wired || typeof window === "undefined") return;
   wired = true;
-  installed = isStandaloneNow();
+  installedFlag = isStandaloneNow();
+  refreshSnap();
 
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
@@ -49,30 +68,38 @@ function ensureWired() {
     emit();
   });
   window.addEventListener("appinstalled", () => {
-    installed = true;
+    installedFlag = true;
     deferredPrompt = null;
     emit();
   });
+
+  const mq = window.matchMedia("(display-mode: standalone)");
+  const onMode = () => {
+    const next = isStandaloneNow();
+    if (next !== installedFlag) {
+      installedFlag = next;
+      emit();
+    }
+  };
+  mq.addEventListener?.("change", onMode);
 }
 
 export function usePwaInstall() {
   ensureWired();
-  const snap = useSyncExternalStore(
-    subscribe,
-    getSnapshot,
-    () => ({ deferred: null, installed: false })
-  );
+  const snap = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const [iosHint, setIosHint] = useState(false);
   const [manualHint, setManualHint] = useState(false);
   const ios = isIosDevice();
 
   useEffect(() => {
-    if (isStandaloneNow() && !installed) {
-      installed = true;
+    const next = isStandaloneNow();
+    if (next !== installedFlag) {
+      installedFlag = next;
       emit();
     }
   }, []);
 
+  // Show install CTA unless the app is already running as installed PWA
   const canInstall = !snap.installed;
 
   const install = useCallback(async () => {
@@ -80,7 +107,7 @@ export function usePwaInstall() {
       await snap.deferred.prompt();
       const { outcome } = await snap.deferred.userChoice;
       if (outcome === "accepted") {
-        installed = true;
+        installedFlag = true;
         deferredPrompt = null;
         emit();
       }

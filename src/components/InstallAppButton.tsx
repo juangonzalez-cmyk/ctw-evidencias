@@ -2,7 +2,7 @@ import { Download, Share, X } from "lucide-react";
 import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { cn } from "@/lib/utils";
 
-type Variant = "banner" | "icon" | "full";
+type Variant = "banner" | "icon" | "chip" | "full";
 
 interface Props {
   variant?: Variant;
@@ -43,6 +43,26 @@ export function InstallAppButton({ variant = "full", className }: Props) {
           title="Descargar app"
         >
           <Download className="w-4 h-4" />
+        </button>
+        {hints}
+      </>
+    );
+  }
+
+  if (variant === "chip") {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => void install()}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold",
+            "bg-primary text-primary-foreground shadow-sm active:scale-[0.98] transition-all",
+            className
+          )}
+        >
+          <Download className="w-3.5 h-3.5" />
+          Instalar
         </button>
         {hints}
       </>
