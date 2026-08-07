@@ -1536,6 +1536,14 @@ const ACCEPTED_MIME = [
   "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif",
   "video/mp4", "video/quicktime", "video/webm",
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/csv",
+  "text/plain",
 ];
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 

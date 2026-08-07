@@ -52,7 +52,7 @@ const PREDEF: Predef[] = [
   { key: "base_datos", label: "100% acceso a base de datos de registro", build: () => "100% acceso a base de datos de registro" },
 ];
 
-const ALLOWED_MIME = /^(image\/(jpeg|jpg|png|webp|gif)|video\/(mp4|quicktime|webm)|application\/pdf)$/i;
+const ALLOWED_MIME = /^(image\/(jpeg|jpg|png|webp|gif|heic)|video\/(mp4|quicktime|webm)|application\/(pdf|msword|vnd\.ms-excel|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation))|text\/(plain|csv))$/i;
 const MAX_SIZE = 50 * 1024 * 1024;
 
 export interface AddBenefitModalProps {
@@ -185,7 +185,8 @@ export const AddBenefitModal = ({
     if (!finalOwner) errs.responsable = "Responsable obligatorio";
     if (file) {
       if (file.size > MAX_SIZE) errs.file = "El archivo excede 50MB";
-      else if (!ALLOWED_MIME.test(file.type)) errs.file = "Tipo no permitido (imagen, video o PDF)";
+      else if (!ALLOWED_MIME.test(file.type) && !/\.(pdf|docx?|xlsx?|pptx?|csv|txt)$/i.test(file.name))
+        errs.file = "Tipo no permitido (imagen, video o documento)";
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -207,8 +208,8 @@ export const AddBenefitModal = ({
       setFile(null);
       return;
     }
-    if (!ALLOWED_MIME.test(f.type)) {
-      toast.error("Tipo no permitido. Usa imagen, video o PDF.");
+    if (!ALLOWED_MIME.test(f.type) && !/\.(pdf|docx?|xlsx?|pptx?|csv|txt)$/i.test(f.name)) {
+      toast.error("Tipo no permitido. Usa imagen, video o documento.");
       e.target.value = "";
       setFile(null);
       return;
@@ -268,7 +269,13 @@ export const AddBenefitModal = ({
         status,
         evidencia_url: evidenciaUrl,
         hora_subida: evidenciaUrl ? new Date().toISOString() : null,
-        media_type: file?.type.startsWith("video") ? "video" : "photo",
+        media_type: file?.type.startsWith("video")
+          ? "video"
+          : file?.type === "application/pdf" || /\.pdf$/i.test(file?.name || "")
+            ? "pdf"
+            : file && !file.type.startsWith("image/")
+              ? "document"
+              : "photo",
       });
 
       if (insErr) {
@@ -520,7 +527,7 @@ export const AddBenefitModal = ({
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf"
+                accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,application/pdf"
                 onChange={handleFileChange}
                 className="block w-full text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-input file:bg-background file:text-foreground file:cursor-pointer"
               />
