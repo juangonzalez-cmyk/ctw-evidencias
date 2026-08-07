@@ -19,7 +19,13 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { hasRequiredEvidence } from "@/lib/standRecepcion";
+import {
+  FLUJO_SIMPLE,
+  FLUJO_STAND_RECEPCION,
+  hasRequiredEvidence,
+  isStandRecepcion,
+  statusForStandProgress,
+} from "@/lib/standRecepcion";
 
 /**
  * Vista móvil tipo base de datos: lista compacta, filtros en dropdowns,
@@ -218,10 +224,35 @@ export function SponsorsBoard() {
 
   const saveRow = async (task: Task, patch: Partial<Task>) => {
     setBusy(true);
-    const { error } = await supabase
-      .from("tasks")
-      .update({ ...patch, edited_at: new Date().toISOString() })
-      .eq("id", task.id);
+    let finalPatch: Partial<Task> = { ...patch, edited_at: new Date().toISOString() };
+
+    if (patch.flujo !== undefined) {
+      const merged = {
+        evidencia_url: task.evidencia_url,
+        acta_recepcion_url: task.acta_recepcion_url,
+        entrega_ctw_at: task.entrega_ctw_at,
+        entrega_sponsor_at: task.entrega_sponsor_at,
+      };
+      if (patch.flujo === FLUJO_STAND_RECEPCION) {
+        finalPatch = {
+          ...finalPatch,
+          flujo: FLUJO_STAND_RECEPCION,
+          media_type: task.media_type || "photo",
+          category: task.category || "Stands",
+          status: statusForStandProgress(merged),
+          approved_at: null,
+        };
+      } else {
+        finalPatch = {
+          ...finalPatch,
+          flujo: FLUJO_SIMPLE,
+          status: task.evidencia_url ? STATUS.REVIEW : STATUS.PENDING,
+          approved_at: null,
+        };
+      }
+    }
+
+    const { error } = await supabase.from("tasks").update(finalPatch).eq("id", task.id);
     setBusy(false);
     if (error) toast.error(error.message);
     else {
@@ -412,6 +443,9 @@ export function SponsorsBoard() {
                                   : "Subida"
                                 : "Pendiente"}
                             </span>
+                            {isStandRecepcion(t) && (
+                              <span className="font-semibold text-primary uppercase">Acta</span>
+                            )}
                           </div>
                         </button>
                         {open ? (
@@ -494,10 +528,37 @@ function InlineEditor({
   const [responsable, setResponsable] = useState(task.responsable || "");
   const [dia, setDia] = useState(task.dia || "");
   const [hora, setHora] = useState(task.hora || "");
+  const [requiereActa, setRequiereActa] = useState(isStandRecepcion(task));
   const approved = task.status === STATUS.APPROVED;
+  const complete = hasRequiredEvidence({ ...task, rejected_at: null });
+
+  useEffect(() => {
+    setResponsable(task.responsable || "");
+    setDia(task.dia || "");
+    setHora(task.hora || "");
+    setRequiereActa(isStandRecepcion(task));
+  }, [task.id, task.responsable, task.dia, task.hora, task.flujo]);
 
   return (
     <div className="px-3 pb-3 pt-0 space-y-2 bg-muted/20">
+      <label className="flex items-start gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-primary"
+          checked={requiereActa}
+          onChange={(e) => setRequiereActa(e.target.checked)}
+          disabled={busy || approved}
+        />
+        <span className="min-w-0">
+          <span className="block text-xs font-semibold leading-snug">
+            Requiere acta de recepción de stand
+          </span>
+          <span className="block text-[10px] text-muted-foreground mt-0.5">
+            Foto + firma del sponsor + horarios de entrega (cada 30 min).
+          </span>
+        </span>
+      </label>
+
       <label className="block text-[10px] uppercase font-bold text-muted-foreground">
         Responsable
         <select
@@ -542,7 +603,17 @@ function InlineEditor({
           rel="noreferrer"
           className="text-[11px] font-semibold text-primary underline block"
         >
-          Ver evidencia
+          Ver {isStandRecepcion(task) ? "foto del stand" : "evidencia"}
+        </a>
+      )}
+      {task.acta_recepcion_url && (
+        <a
+          href={task.acta_recepcion_url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[11px] font-semibold text-primary underline block"
+        >
+          Ver acta firmada{task.firma_nombre ? ` (${task.firma_nombre})` : ""}
         </a>
       )}
       <div className="flex gap-2">
@@ -551,17 +622,18 @@ function InlineEditor({
           className="flex-1 h-9"
           disabled={busy}
           onClick={() =>
-            onSave(task, {
+            void onSave(task, {
               responsable,
               dia: dia.trim() || null,
               hora: hora.trim() || null,
               is_timed: !!(dia.trim() || hora.trim()),
+              flujo: requiereActa ? FLUJO_STAND_RECEPCION : FLUJO_SIMPLE,
             })
           }
         >
           Guardar
         </Button>
-        {task.evidencia_url && !approved && (
+        {complete && !approved && (
           <Button
             size="sm"
             variant="outline"

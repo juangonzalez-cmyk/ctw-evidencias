@@ -61,6 +61,8 @@ import {
 } from "@/lib/fases";
 import { downloadAllEvidencias, type DownloadProgress } from "@/lib/downloadEvidencias";
 import {
+  FLUJO_SIMPLE,
+  FLUJO_STAND_RECEPCION,
   STAND_DATETIME_STEP_SECONDS,
   formatEntregaBogota,
   fromDatetimeLocalValue,
@@ -529,7 +531,11 @@ export const SponsorCompliance = () => {
       }
     }
 
-    if (isStandRecepcion(t)) {
+    if (
+      (finalUpdates.flujo ?? t.flujo) === FLUJO_STAND_RECEPCION ||
+      isStandRecepcion(t)
+    ) {
+      const flujoFinal = (finalUpdates.flujo as string | undefined) ?? t.flujo;
       const merged = {
         evidencia_url: (finalUpdates.evidencia_url ?? t.evidencia_url) as string | null,
         acta_recepcion_url: t.acta_recepcion_url,
@@ -538,25 +544,34 @@ export const SponsorCompliance = () => {
           | string
           | null,
       };
-      try {
-        await assertStandEntregasAvailable(
-          t.event_id,
-          t.id,
-          merged.entrega_ctw_at,
-          merged.entrega_sponsor_at
-        );
-      } catch (err: any) {
-        setBusyId(null);
-        toast.error(err?.message || "Horario de stand no válido");
-        return;
-      }
-      const next = statusForStandProgress(merged);
-      if (t.status === STATUS.APPROVED && isStandRecepcionComplete(merged) && !file) {
-        finalUpdates.status = STATUS.APPROVED;
+      if (flujoFinal === FLUJO_STAND_RECEPCION) {
+        try {
+          await assertStandEntregasAvailable(
+            t.event_id,
+            t.id,
+            merged.entrega_ctw_at,
+            merged.entrega_sponsor_at
+          );
+        } catch (err: any) {
+          setBusyId(null);
+          toast.error(err?.message || "Horario de stand no válido");
+          return;
+        }
+        const next = statusForStandProgress(merged);
+        if (t.status === STATUS.APPROVED && isStandRecepcionComplete(merged) && !file) {
+          finalUpdates.status = STATUS.APPROVED;
+        } else {
+          finalUpdates.status = next;
+          if (next === STATUS.PENDING) finalUpdates.approved_at = null;
+          finalUpdates.rejected_at = null;
+        }
+        finalUpdates.flujo = FLUJO_STAND_RECEPCION;
       } else {
-        finalUpdates.status = next;
-        if (next === STATUS.PENDING) finalUpdates.approved_at = null;
-        finalUpdates.rejected_at = null;
+        finalUpdates.flujo = FLUJO_SIMPLE;
+        if (!file) {
+          finalUpdates.status = t.evidencia_url ? STATUS.REVIEW : STATUS.PENDING;
+          finalUpdates.approved_at = null;
+        }
       }
     }
 
@@ -1669,6 +1684,7 @@ const EditBenefitDialog = ({
   const [tipoEntrega, setTipoEntrega] = useState<"contractual" | "adicional">("contractual");
   const [entregaCtw, setEntregaCtw] = useState("");
   const [entregaSponsor, setEntregaSponsor] = useState("");
+  const [requiereActa, setRequiereActa] = useState(false);
   const [newFile, setNewFile] = useState<File | null>(null);
   const [newFilePreview, setNewFilePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1686,6 +1702,7 @@ const EditBenefitDialog = ({
       setTipoEntrega(((task as any).tipo_entrega as "contractual" | "adicional") || "contractual");
       setEntregaCtw(toDatetimeLocalValue(task.entrega_ctw_at));
       setEntregaSponsor(toDatetimeLocalValue(task.entrega_sponsor_at));
+      setRequiereActa(isStandRecepcion(task));
       setNewFile(null);
       setNewFilePreview(null);
     }
@@ -1737,8 +1754,8 @@ const EditBenefitDialog = ({
     if (!tipo.trim()) { toast.error("El tipo de beneficio es obligatorio"); return; }
     if (!responsable.trim()) { toast.error("El responsable es obligatorio"); return; }
     if (!fase) { toast.error("La fase es obligatoria"); return; }
-    const ctwIso = isStandRecepcion(task) ? fromDatetimeLocalValue(entregaCtw) : null;
-    const sponsorIso = isStandRecepcion(task) ? fromDatetimeLocalValue(entregaSponsor) : null;
+    const ctwIso = requiereActa ? fromDatetimeLocalValue(entregaCtw) : null;
+    const sponsorIso = requiereActa ? fromDatetimeLocalValue(entregaSponsor) : null;
     onSave({
       tipo_beneficio: tipo.trim(),
       dia: dia.trim() || null,
@@ -1749,10 +1766,12 @@ const EditBenefitDialog = ({
       responsable: responsable.trim(),
       fase,
       tipo_entrega: tipoEntrega,
-      ...(isStandRecepcion(task)
+      flujo: requiereActa ? FLUJO_STAND_RECEPCION : FLUJO_SIMPLE,
+      ...(requiereActa
         ? {
             entrega_ctw_at: ctwIso,
             entrega_sponsor_at: sponsorIso,
+            category: task.category || "Stands",
           }
         : {}),
     } as any, newFile);
@@ -1858,7 +1877,24 @@ const EditBenefitDialog = ({
             <Textarea value={notas} onChange={(e) => setNotas(e.target.value)} rows={4} />
           </Field>
 
-          {isStandRecepcion(task) && (
+          <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/20 px-3 py-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-primary"
+              checked={requiereActa}
+              onChange={(e) => setRequiereActa(e.target.checked)}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold">
+                Requiere acta de recepción de stand
+              </span>
+              <span className="block text-[10px] text-muted-foreground mt-0.5">
+                Foto + firma del sponsor + horarios de entrega.
+              </span>
+            </span>
+          </label>
+
+          {requiereActa && (
             <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
               <div className="text-[11px] uppercase font-bold text-muted-foreground tracking-wider">
                 Recepción de stand
@@ -1901,7 +1937,7 @@ const EditBenefitDialog = ({
           {/* EVIDENCIA */}
           <div>
             <div className="text-[11px] uppercase font-bold text-muted-foreground mb-2 tracking-wider">
-              {isStandRecepcion(task) ? "Foto del stand" : "Evidencia"}
+              {requiereActa ? "Foto del stand" : "Evidencia"}
             </div>
             <input
               ref={fileInputRef}

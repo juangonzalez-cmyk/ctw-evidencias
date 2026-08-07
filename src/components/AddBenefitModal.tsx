@@ -110,6 +110,7 @@ export const AddBenefitModal = ({
   const [stage, setStage] = useState<string>("");
   const [speaker, setSpeaker] = useState<string>("");
   const [notas, setNotas] = useState<string>("");
+  const [requiereActa, setRequiereActa] = useState(false);
 
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -145,6 +146,7 @@ export const AddBenefitModal = ({
     setStage("");
     setSpeaker("");
     setNotas("");
+    setRequiereActa(false);
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -259,7 +261,7 @@ export const AddBenefitModal = ({
 
       const status = evidenciaUrl ? "por_validar" : "pendiente";
       const marca = resolveMarca(sponsor.trim());
-      const standFlow = isStandTipo(tipo, predefKey);
+      const standFlow = requiereActa || isStandTipo(tipo, predefKey);
       // Stands: foto sola no alcanza; quedan pendientes hasta acta + horarios
       const finalStatus = standFlow ? "pendiente" : status;
 
@@ -392,7 +394,9 @@ export const AddBenefitModal = ({
                     if (v === "custom") { setTipoMode("custom"); return; }
                     if (v.startsWith("existing:")) {
                       setTipoMode("existing");
-                      setExistingTipo(v.slice("existing:".length));
+                      const t = v.slice("existing:".length);
+                      setExistingTipo(t);
+                      if (isStandTipo(t, "")) setRequiereActa(true);
                       return;
                     }
                     if (v.startsWith("predef:")) {
@@ -400,7 +404,8 @@ export const AddBenefitModal = ({
                       setTipoMode("predef");
                       setPredefKey(key);
                       const p = PREDEF.find((x) => x.key === key);
-                      setPredefN(p?.defaultN || 1);
+                      if (p) setPredefN(p.defaultN || 1);
+                      if (key.startsWith("stand_")) setRequiereActa(true);
                       return;
                     }
                   }}
@@ -451,6 +456,23 @@ export const AddBenefitModal = ({
                 )}
               </div>
             </FieldA>
+
+            <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/20 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 accent-primary"
+                checked={requiereActa}
+                onChange={(e) => setRequiereActa(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold">
+                  Requiere acta de recepción de stand
+                </span>
+                <span className="block text-[10px] text-muted-foreground mt-0.5">
+                  El responsable pedirá foto + firma del sponsor + horarios de entrega.
+                </span>
+              </span>
+            </label>
 
             {/* Responsable */}
             <FieldA label="Responsable *" error={errors.responsable}>

@@ -5,6 +5,7 @@ import type { Task } from "@/hooks/useTasks";
 import { uploadActaRecepcion } from "@/lib/upload";
 import { useEvent } from "@/context/EventContext";
 import { cn } from "@/lib/utils";
+import { STAND_ACEPTACION_TEXT } from "@/lib/standRecepcion";
 
 interface Props {
   open: boolean;
@@ -171,13 +172,11 @@ export function StandRecepcionModal({
     ctx.font = "bold 22px Helvetica, Arial, sans-serif";
     ctx.fillText("Declaración", 64, y);
     y += 36;
-    ctx.font = "22px Helvetica, Arial, sans-serif";
-    ctx.fillStyle = "#333333";
-    const decl =
-      "El firmante confirma haber recibido el stand / espacio asignado en las condiciones acordadas con Colombia Tech Week.";
-    for (const line of wrapText(ctx, decl, W - 128)) {
+    ctx.font = "bold 24px Helvetica, Arial, sans-serif";
+    ctx.fillStyle = "#111111";
+    for (const line of wrapText(ctx, STAND_ACEPTACION_TEXT, W - 128)) {
       ctx.fillText(line, 64, y);
-      y += 30;
+      y += 32;
     }
 
     y += 40;
@@ -287,6 +286,13 @@ export function StandRecepcionModal({
           Pasa el teléfono al sponsor para que escriba su nombre y firme con el dedo.
         </p>
 
+        <div className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+            Texto de aceptación
+          </p>
+          <p className="text-sm font-semibold leading-snug">{STAND_ACEPTACION_TEXT}</p>
+        </div>
+
         <label className="block space-y-1.5">
           <span className="text-[11px] font-bold uppercase text-muted-foreground">
             Nombre del firmante
@@ -303,7 +309,7 @@ export function StandRecepcionModal({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase text-muted-foreground">
-              Firma
+              Firma con el dedo
             </span>
             <button
               type="button"

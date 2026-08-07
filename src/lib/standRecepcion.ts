@@ -14,6 +14,10 @@ export type TaskLike = Pick<
 export const FLUJO_SIMPLE = "simple";
 export const FLUJO_STAND_RECEPCION = "stand_recepcion";
 
+/** Texto fijo que acepta el sponsor al firmar el acta. */
+export const STAND_ACEPTACION_TEXT =
+  "Acepto la recepción del stand de acuerdo a lo establecido.";
+
 export function isStandRecepcion(task: { flujo?: string | null }): boolean {
   return task.flujo === FLUJO_STAND_RECEPCION;
 }
