@@ -36,7 +36,7 @@ export function InstallAppButton({ variant = "full", className }: Props) {
           type="button"
           onClick={() => void install()}
           className={cn(
-            "p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors",
+            "inline-flex items-center justify-center rounded-xl p-2 border border-border bg-card text-foreground hover:bg-muted transition-colors",
             className
           )}
           aria-label="Descargar app"

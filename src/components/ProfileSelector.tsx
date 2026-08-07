@@ -32,7 +32,11 @@ export const ProfileSelector = ({ onSelect }: Props) => {
   return (
     <div className="page-home">
       <div className="px-6 pt-10 pb-8 max-w-md mx-auto">
-        <div className="flex justify-end mb-6">
+        <div className="flex justify-end mb-6 gap-2">
+          <InstallAppButton
+            variant="icon"
+            className="border border-border bg-card text-foreground hover:bg-muted dark:bg-white/10 dark:border-white/20 dark:text-white dark:hover:bg-white/20"
+          />
           <ThemeToggle className="dark:bg-white/10 dark:border-white/20 dark:text-white dark:hover:bg-white/20" />
         </div>
 
@@ -52,10 +56,6 @@ export const ProfileSelector = ({ onSelect }: Props) => {
           <p className="text-muted-foreground dark:text-white/70 mt-3 text-sm">
             Selecciona tu perfil para capturar beneficios en el celular.
           </p>
-        </div>
-
-        <div className="mb-6">
-          <InstallAppButton variant="banner" />
         </div>
 
         {events.length > 1 && (

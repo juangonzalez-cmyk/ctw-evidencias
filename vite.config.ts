@@ -14,6 +14,35 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
+  build: {
+    target: "es2020",
+    cssCodeSplit: true,
+    modulePreload: { polyfill: false },
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("jspdf") || id.includes("html2canvas") || id.includes("dompurify")) {
+            return "pdf";
+          }
+          if (id.includes("@supabase")) return "supabase";
+          if (id.includes("lucide-react")) return "icons";
+          if (id.includes("@radix-ui") || id.includes("cmdk") || id.includes("vaul")) {
+            return "ui";
+          }
+          if (
+            id.includes("react-dom") ||
+            id.includes("react-router") ||
+            id.includes("/react/") ||
+            id.includes("scheduler")
+          ) {
+            return "react";
+          }
+          if (id.includes("@tanstack")) return "query";
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     notionProxyPlugin(),
@@ -22,6 +51,7 @@ export default defineConfig(({ mode }) => ({
       registerType: "autoUpdate",
       includeAssets: [
         "favicon.ico",
+        "apple-touch-icon.png",
         "isotipo_negro.png",
         "isotipo_blanco.png",
         "robots.txt",
@@ -32,7 +62,7 @@ export default defineConfig(({ mode }) => ({
         description:
           "Captura y entrega de evidencias de sponsors — Colombia Tech Week",
         theme_color: "#96e631",
-        background_color: "#000000",
+        background_color: "#96e631",
         display: "standalone",
         orientation: "portrait-primary",
         start_url: "/",
@@ -60,16 +90,23 @@ export default defineConfig(({ mode }) => ({
       },
       workbox: {
         navigateFallback: "/index.html",
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // Keep precache lean — heavy PDF libs load on demand
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,webmanifest}"],
+        globIgnores: [
+          "**/pdf-*.js",
+          "**/jspdf*",
+          "**/html2canvas*",
+          "**/purify*",
+          "**/index.es-*.js",
+        ],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) =>
-              url.hostname.includes("supabase.co"),
+            urlPattern: ({ url }) => url.hostname.includes("supabase.co"),
             handler: "NetworkFirst",
             options: {
               cacheName: "supabase-api",
-              networkTimeoutSeconds: 8,
-              expiration: { maxEntries: 64, maxAgeSeconds: 60 * 60 },
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 48, maxAgeSeconds: 60 * 30 },
             },
           },
         ],

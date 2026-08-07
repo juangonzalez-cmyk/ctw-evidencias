@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -33,6 +34,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const booted = useRef(false);
 
   const loadProfiles = useCallback(async (eventId: string) => {
     const { data, error: err } = await supabase
@@ -46,12 +48,13 @@ export function EventProvider({ children }: { children: ReactNode }) {
       setProfiles([]);
       return;
     }
-    setProfiles(data ?? []);
+    setProfiles((data as ProfileRow[]) ?? []);
   }, []);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    if (!booted.current) setLoading(true);
+
     const { data, error: err } = await supabase
       .from("events")
       .select("*")
@@ -88,6 +91,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
     } else {
       setProfiles([]);
     }
+    booted.current = true;
     setLoading(false);
   }, [loadProfiles]);
 

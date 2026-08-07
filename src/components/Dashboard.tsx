@@ -1,11 +1,5 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { type Profile } from "@/data/profiles";
-import { TaskList } from "./TaskList";
-import { Agenda } from "./Agenda";
-import { ControlPanel } from "./ControlPanel";
-import { SponsorsBoard } from "./SponsorsBoard";
-import { PendingByResponsible } from "./PendingByResponsible";
-import { AdminPanel } from "./AdminPanel";
 import { ThemeToggle } from "./ThemeToggle";
 import { InstallAppButton } from "./InstallAppButton";
 import { useEvent } from "@/context/EventContext";
@@ -20,12 +14,39 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const TaskList = lazy(() =>
+  import("./TaskList").then((m) => ({ default: m.TaskList }))
+);
+const Agenda = lazy(() =>
+  import("./Agenda").then((m) => ({ default: m.Agenda }))
+);
+const ControlPanel = lazy(() =>
+  import("./ControlPanel").then((m) => ({ default: m.ControlPanel }))
+);
+const SponsorsBoard = lazy(() =>
+  import("./SponsorsBoard").then((m) => ({ default: m.SponsorsBoard }))
+);
+const PendingByResponsible = lazy(() =>
+  import("./PendingByResponsible").then((m) => ({
+    default: m.PendingByResponsible,
+  }))
+);
+const AdminPanel = lazy(() =>
+  import("./AdminPanel").then((m) => ({ default: m.AdminPanel }))
+);
+
 interface Props {
   profile: Profile;
   onChangeProfile: () => void;
 }
 
 type Tab = "tareas" | "agenda" | "control" | "cumplimiento" | "pendientes" | "config";
+
+const TabFallback = () => (
+  <div className="py-16 flex justify-center">
+    <div className="h-7 w-7 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+  </div>
+);
 
 export const Dashboard = ({ profile, onChangeProfile }: Props) => {
   const { event } = useEvent();
@@ -54,7 +75,10 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <InstallAppButton variant="chip" />
+            <InstallAppButton
+              variant="icon"
+              className="bg-white/10 border border-white/15 text-white hover:bg-white/20"
+            />
             <ThemeToggle className="bg-white/10 border-white/15 text-white hover:bg-white/20" />
             <button
               onClick={onChangeProfile}
@@ -83,19 +107,17 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
         </div>
       </header>
 
-      <div className={cn("px-4 pt-3 mx-auto", shellMax)}>
-        <InstallAppButton variant="banner" />
-      </div>
-
-      <main className={cn("px-4 pt-4 mx-auto pb-10", shellMax)}>
-        {tab === "control" && isCoord && <ControlPanel />}
-        {tab === "cumplimiento" && isCoord && <SponsorsBoard />}
-        {tab === "pendientes" && isCoord && <PendingByResponsible />}
-        {tab === "config" && isCoord && <AdminPanel />}
-        {tab === "agenda" && !isCoord && <Agenda responsable={profile.name} />}
-        {tab === "tareas" && !isCoord && (
-          <TaskList responsable={profile.name} uploaderName={profile.name} />
-        )}
+      <main className={cn("px-4 pt-5 mx-auto pb-10", shellMax)}>
+        <Suspense fallback={<TabFallback />}>
+          {tab === "control" && isCoord && <ControlPanel />}
+          {tab === "cumplimiento" && isCoord && <SponsorsBoard />}
+          {tab === "pendientes" && isCoord && <PendingByResponsible />}
+          {tab === "config" && isCoord && <AdminPanel />}
+          {tab === "agenda" && !isCoord && <Agenda responsable={profile.name} />}
+          {tab === "tareas" && !isCoord && (
+            <TaskList responsable={profile.name} uploaderName={profile.name} />
+          )}
+        </Suspense>
       </main>
     </div>
   );

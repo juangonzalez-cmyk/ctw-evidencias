@@ -9,7 +9,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Evidencias" />
-    <link rel="apple-touch-icon" href="/pwa-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192.png" />
     <title>CTW Evidencias</title>
     <meta name="description" content="Captura y entrega de evidencias de sponsors — Colombia Tech Week" />
     <meta name="author" content="Colombia Tech Week" />
@@ -19,6 +20,18 @@
     <meta property="og:image" content="/pwa-512.png" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="CTW Evidencias" />
+    <script>
+      (function () {
+        try {
+          var k = "ctw-evidencias-theme";
+          var d = localStorage.getItem(k);
+          var dark =
+            d === "dark" ||
+            (!d && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
