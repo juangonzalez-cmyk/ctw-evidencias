@@ -1,9 +1,22 @@
 import { useRef, useState } from "react";
-import { Camera, Video, CheckCircle2, Clock, AlertTriangle, RotateCw, Loader2, ImageIcon, PlayCircle } from "lucide-react";
+import {
+  Camera,
+  Video,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  RotateCw,
+  Loader2,
+  ImageIcon,
+  Trash2,
+  RefreshCw,
+  FileCheck2,
+  ExternalLink,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/hooks/useTasks";
 import { STATUS } from "@/hooks/useTasks";
-import { uploadEvidencia } from "@/lib/upload";
+import { uploadEvidencia, removeEvidencia, isSupabaseEvidencia } from "@/lib/upload";
 import { supabase } from "@/integrations/supabase/client";
 import { useEvent } from "@/context/EventContext";
 import { toast } from "sonner";
@@ -21,7 +34,6 @@ const isLate = (task: Task): boolean => {
   if (task.hora.toLowerCase().includes("confirmar")) return false;
   const [hh, mm] = task.hora.split(":").map(Number);
   if (isNaN(hh)) return false;
-  // Compara solo hora del día actual (fechas textuales varían por evento)
   const now = new Date();
   const target = new Date();
   target.setHours(hh, mm || 0, 0, 0);
@@ -37,24 +49,34 @@ const STATUS_META: Record<string, { label: string; cls: string; icon: string }> 
 
 const isMencionMC = (task: Task) => !!(task.brands && task.brands.length > 0);
 
+const isVideoUrl = (url: string) => /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+const isImageUrl = (url: string) =>
+  /\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(url) || url.includes("/evidencias/");
+
 export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const { event } = useEvent();
   const fileRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [justDone, setJustDone] = useState(false);
   const [showBrandConfirm, setShowBrandConfirm] = useState(false);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [savingBrands, setSavingBrands] = useState(false);
 
-  const isVideo = (task as any).media_type === "video";
+  const isVideo = task.media_type === "video" || (!!task.evidencia_url && isVideoUrl(task.evidencia_url));
   const late = isLate(task);
   const meta = STATUS_META[task.status] ?? STATUS_META[STATUS.PENDING];
-  const canUpload = task.status === STATUS.PENDING || task.status === STATUS.REJECTED || task.status === STATUS.REVIEW;
+  const approved = task.status === STATUS.APPROVED;
+  const hasEvidence = !!(task.evidencia_url && task.evidencia_url.trim());
+  const storedDoc = isSupabaseEvidencia(task.evidencia_url);
+  const canEditEvidence =
+    !approved &&
+    (task.status === STATUS.PENDING ||
+      task.status === STATUS.REJECTED ||
+      task.status === STATUS.REVIEW);
   const mencion = isMencionMC(task);
-
-  // For mención tasks: completed = has video + at least 1 brand captured
-  const mencionComplete = mencion && task.evidencia_url && (task.captured_brands?.length ?? 0) > 0;
+  const mencionComplete = mencion && hasEvidence && (task.captured_brands?.length ?? 0) > 0;
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,17 +86,20 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       const subido = relevoOf
         ? `${uploaderName} (relevo de ${relevoOf})`
         : uploaderName;
-      await uploadEvidencia(task.id, file, subido, event?.id);
+      await uploadEvidencia(task.id, file, subido, event?.id, task.evidencia_url);
 
       if (mencion) {
-        // Show brand confirmation screen instead of instant success
         setSelectedBrands(task.captured_brands ?? []);
         setShowBrandConfirm(true);
-        toast.info("Video subido. Marca las marcas capturadas.", { description: task.marca });
+        toast.info("Archivo guardado. Marca las marcas capturadas.", {
+          description: task.marca,
+        });
       } else {
         setJustDone(true);
-        toast.success(isVideo ? "¡Video subido!" : "¡Foto subida!", { description: task.marca });
-        setTimeout(() => setJustDone(false), 1500);
+        toast.success(hasEvidence ? "Evidencia reemplazada" : "Evidencia guardada", {
+          description: "Quedó como archivo en el almacenamiento del evento",
+        });
+        setTimeout(() => setJustDone(false), 1200);
       }
     } catch (err) {
       console.error(err);
@@ -82,6 +107,22 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
+      if (galleryRef.current) galleryRef.current.value = "";
+    }
+  };
+
+  const handleRemove = async () => {
+    if (approved || !hasEvidence) return;
+    if (!confirm("¿Quitar esta evidencia? Podrás subir otra después.")) return;
+    setRemoving(true);
+    try {
+      await removeEvidencia(task.id, task.evidencia_url);
+      toast.success("Evidencia eliminada");
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo quitar", { description: (err as Error).message });
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -103,7 +144,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         .update({ captured_brands: selectedBrands })
         .eq("id", task.id);
       if (error) throw error;
-      toast.success("¡Marcas confirmadas!", { description: `${selectedBrands.length} marcas capturadas` });
+      toast.success("¡Marcas confirmadas!", {
+        description: `${selectedBrands.length} marcas capturadas`,
+      });
       setShowBrandConfirm(false);
       setJustDone(true);
       setTimeout(() => setJustDone(false), 1500);
@@ -114,6 +157,8 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       setSavingBrands(false);
     }
   };
+
+  const busy = uploading || removing;
 
   return (
     <div
@@ -126,14 +171,14 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         ref={fileRef}
         type="file"
         accept={isVideo ? "video/*" : "image/*"}
-        capture={isVideo ? "environment" : "environment"}
+        capture="environment"
         onChange={handleFile}
         className="hidden"
       />
       <input
         ref={galleryRef}
         type="file"
-        accept={isVideo ? "video/*" : "image/*"}
+        accept={isVideo ? "video/*" : "image/*,application/pdf"}
         onChange={handleFile}
         className="hidden"
       />
@@ -166,7 +211,6 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         </span>
       </div>
 
-      {/* Brand chips for Mención MC */}
       {mencion && (
         <div className="flex flex-wrap gap-1.5 mb-2">
           {task.brands!.map((brand) => {
@@ -213,14 +257,61 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         </div>
       )}
 
-      {/* Brand capture progress for mentions with video */}
-      {mencion && task.evidencia_url && !showBrandConfirm && (
+      {/* Vista previa del archivo guardado */}
+      {hasEvidence && (
+        <div className="mb-3 rounded-xl overflow-hidden border border-border bg-muted/30">
+          {isVideo || (task.evidencia_url && isVideoUrl(task.evidencia_url)) ? (
+            <video
+              src={task.evidencia_url!}
+              controls
+              playsInline
+              className="w-full max-h-48 bg-black object-contain"
+            />
+          ) : task.evidencia_url && isImageUrl(task.evidencia_url) ? (
+            <img
+              src={task.evidencia_url}
+              alt={`Evidencia ${task.marca}`}
+              className="w-full max-h-48 object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <a
+              href={task.evidencia_url!}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 px-3 py-4 text-sm font-medium text-primary"
+            >
+              <ExternalLink className="w-4 h-4" /> Abrir evidencia
+            </a>
+          )}
+          <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] border-t border-border bg-card">
+            {storedDoc ? (
+              <>
+                <FileCheck2 className="w-3.5 h-3.5 text-success shrink-0" />
+                <span className="text-muted-foreground">
+                  Guardada como archivo en el evento
+                </span>
+              </>
+            ) : (
+              <>
+                <ExternalLink className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span className="text-amber-700 dark:text-amber-400">
+                  Link externo — vuelve a subirla para guardarla en CTW
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {mencion && hasEvidence && !showBrandConfirm && (
         <div className="text-xs mb-2 flex items-center gap-2">
           <span className="font-semibold">
             Marcas capturadas: {task.captured_brands?.length ?? 0}/{task.brands!.length}
           </span>
-          {!mencionComplete && (
+          {!mencionComplete && canEditEvidence && (
             <button
+              type="button"
               onClick={() => {
                 setSelectedBrands(task.captured_brands ?? []);
                 setShowBrandConfirm(true);
@@ -233,27 +324,14 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         </div>
       )}
 
-      <div className="flex items-center gap-2 mt-2">
-        {task.evidencia_url && (
-          <a
-            href={task.evidencia_url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1.5 text-xs text-primary font-medium px-3 py-2 bg-primary/10 rounded-lg hover:bg-primary/20"
-          >
-            {isVideo ? <PlayCircle className="w-3.5 h-3.5" /> : <ImageIcon className="w-3.5 h-3.5" />}
-            {isVideo ? "Ver video" : "Ver foto"}
-          </a>
-        )}
-
-        {canUpload && (
-          <div className="flex-1 flex gap-2">
+      <div className="flex flex-col gap-2 mt-2">
+        {!hasEvidence && canEditEvidence && (
+          <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 font-semibold text-sm py-3 rounded-xl text-primary-foreground gradient-primary disabled:opacity-50 active:scale-95 transition-transform"
-              )}
+              disabled={busy}
+              className="flex-1 flex items-center justify-center gap-2 font-semibold text-sm py-3 rounded-xl text-primary-foreground gradient-primary disabled:opacity-50 active:scale-95 transition-transform"
             >
               {uploading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -272,8 +350,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               )}
             </button>
             <button
+              type="button"
               onClick={() => galleryRef.current?.click()}
-              disabled={uploading}
+              disabled={busy}
               className="px-3 py-3 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
               title="Elegir de galería"
             >
@@ -281,16 +360,70 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
             </button>
           </div>
         )}
+
+        {hasEvidence && canEditEvidence && (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              className="flex-1 flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
+            >
+              {uploading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" /> Cambiar
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => galleryRef.current?.click()}
+              disabled={busy}
+              className="px-3 py-2.5 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
+            >
+              Galería
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleRemove()}
+              disabled={busy}
+              className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              title="Quitar evidencia"
+            >
+              {removing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            </button>
+          </div>
+        )}
+
+        {hasEvidence && approved && (
+          <p className="text-[11px] text-muted-foreground">
+            Aprobada — ya no se puede cambiar ni quitar.
+          </p>
+        )}
+
+        {!hasEvidence && !canEditEvidence && (
+          <a
+            href={task.evidencia_url || "#"}
+            className="flex items-center gap-1.5 text-xs text-primary font-medium px-3 py-2 bg-primary/10 rounded-lg"
+          >
+            <ImageIcon className="w-3.5 h-3.5" /> Ver evidencia
+          </a>
+        )}
       </div>
 
       {task.subido_por && (
         <p className="text-[10px] text-muted-foreground mt-2">
           Subido por {task.subido_por}
-          {task.hora_subida && ` · ${new Date(task.hora_subida).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`}
+          {task.hora_subida &&
+            ` · ${new Date(task.hora_subida).toLocaleTimeString("es-CO", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}`}
         </p>
       )}
 
-      {/* Brand confirmation overlay */}
       {showBrandConfirm && (
         <div className="absolute inset-0 bg-background/98 rounded-2xl p-4 flex flex-col z-10 overflow-y-auto">
           <h4 className="font-bold text-sm mb-1">¿Qué marcas quedaron capturadas?</h4>
@@ -310,12 +443,14 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           </div>
           <div className="flex gap-2 mt-4">
             <button
+              type="button"
               onClick={() => setShowBrandConfirm(false)}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-secondary text-muted-foreground"
             >
               Cancelar
             </button>
             <button
+              type="button"
               onClick={handleSaveBrands}
               disabled={savingBrands || selectedBrands.length === 0}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold gradient-primary text-primary-foreground disabled:opacity-50"
