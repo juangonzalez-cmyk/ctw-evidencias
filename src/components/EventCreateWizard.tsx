@@ -184,13 +184,13 @@ export function EventCreateWizard({ onDone, fullscreen }: Props) {
           {
             template_id: tpl.id,
             prompt: "¿Qué tan satisfecho estás con la entrega de beneficios?",
-            question_type: "scale",
+            question_type: "scale_10",
             sort_order: 0,
           },
           {
             template_id: tpl.id,
             prompt: "¿La comunicación con el equipo CS fue clara y oportuna?",
-            question_type: "scale",
+            question_type: "scale_10",
             sort_order: 1,
           },
           {
