@@ -52,6 +52,10 @@ export default defineConfig(({ mode }) => ({
       includeAssets: [
         "favicon.ico",
         "apple-touch-icon.png",
+        "pwa-192.png",
+        "pwa-512.png",
+        "pwa-192-maskable.png",
+        "pwa-512-maskable.png",
         "isotipo_negro.png",
         "isotipo_blanco.png",
         "robots.txt",
@@ -71,17 +75,25 @@ export default defineConfig(({ mode }) => ({
         categories: ["business", "productivity"],
         icons: [
           {
-            src: "/pwa-192.png",
+            src: "/pwa-192.png?v=3",
             sizes: "192x192",
             type: "image/png",
+            purpose: "any",
           },
           {
-            src: "/pwa-512.png",
+            src: "/pwa-512.png?v=3",
             sizes: "512x512",
             type: "image/png",
+            purpose: "any",
           },
           {
-            src: "/pwa-512.png",
+            src: "/pwa-192-maskable.png?v=3",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          {
+            src: "/pwa-512-maskable.png?v=3",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",
