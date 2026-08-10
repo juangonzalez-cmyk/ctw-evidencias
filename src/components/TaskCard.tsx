@@ -22,6 +22,7 @@ import { STATUS } from "@/hooks/useTasks";
 import {
   uploadEvidencia,
   removeEvidencia,
+  removeEvidenciaItem,
   removeActaRecepcion,
   updateStandEntregas,
   saveEvidenciaLink,
@@ -35,6 +36,7 @@ import {
   fileExt,
   EVIDENCIA_ACCEPT,
 } from "@/lib/upload";
+import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
 import { supabase } from "@/integrations/supabase/client";
 import { useEvent } from "@/context/EventContext";
 import { toast } from "sonner";
@@ -118,7 +120,8 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
     const spIso = fromDatetimeLocalValue(sponsorLocal);
     return isSponsorMinGapMet(effectiveCtwIso, spIso);
   }, [effectiveCtwIso, sponsorLocal]);
-  const url = task.evidencia_url || "";
+  const evidencias = useMemo(() => listEvidencias(task), [task]);
+  const url = task.evidencia_url || evidencias[0]?.url || "";
   const isVideo = task.media_type === "video" || (!!url && isVideoUrl(url));
   const isDoc =
     task.media_type === "pdf" ||
@@ -128,7 +131,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const late = isLate(task);
   const meta = STATUS_META[task.status] ?? STATUS_META[STATUS.PENDING];
   const approved = task.status === STATUS.APPROVED;
-  const hasEvidence = !!(url && url.trim());
+  const hasEvidence = evidencias.length > 0 || !!(url && url.trim());
   const hasActa = hasActaRecepcion(task);
   const storedDoc = isSupabaseEvidencia(url);
   const canEditEvidence =
@@ -171,9 +174,14 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         });
       } else {
         setJustDone(true);
-        toast.success(hasEvidence ? "Evidencia reemplazada" : stand ? "Foto del stand guardada" : "Evidencia guardada", {
-          description: file.name,
-        });
+        toast.success(
+          stand
+            ? "Foto del stand guardada"
+            : hasEvidence
+              ? "Soporte agregado"
+              : "Evidencia guardada",
+          { description: file.name }
+        );
         setTimeout(() => setJustDone(false), 1200);
       }
     } catch (err) {
@@ -189,11 +197,33 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
 
   const handleRemove = async () => {
     if (approved || !hasEvidence) return;
-    if (!confirm("¿Quitar esta evidencia? Podrás subir otra después.")) return;
+    if (
+      !confirm(
+        evidencias.length > 1
+          ? "¿Quitar TODOS los soportes de este beneficio?"
+          : "¿Quitar esta evidencia? Podrás subir otra después."
+      )
+    )
+      return;
     setRemoving(true);
     try {
       await removeEvidencia(task.id, task.evidencia_url);
       toast.success("Evidencia eliminada");
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo quitar", { description: (err as Error).message });
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const handleRemoveItem = async (itemId: string) => {
+    if (approved) return;
+    if (!confirm("¿Quitar este soporte?")) return;
+    setRemoving(true);
+    try {
+      await removeEvidenciaItem(task.id, itemId);
+      toast.success("Soporte eliminado");
     } catch (err) {
       console.error(err);
       toast.error("No se pudo quitar", { description: (err as Error).message });
@@ -224,7 +254,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         ? `${uploaderName} (relevo de ${relevoOf})`
         : uploaderName;
       await saveEvidenciaLink(task.id, linkDraft, subido, task.evidencia_url);
-      toast.success("Link guardado como evidencia");
+      toast.success(hasEvidence ? "Link agregado" : "Link guardado como evidencia");
       setShowLinkInput(false);
       setLinkDraft("");
       setJustDone(true);
@@ -467,78 +497,106 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
         </div>
       )}
 
-      {hasEvidence && (
-        <div className="mb-3 rounded-xl overflow-hidden border border-border bg-muted/30">
-          {isVideo ? (
-            <video
-              src={url}
-              controls
-              playsInline
-              className="w-full max-h-48 bg-black object-contain"
-            />
-          ) : isImageUrl(url) && !isLink ? (
-            <img
-              src={url}
-              alt={`Evidencia ${task.marca}`}
-              className="w-full max-h-48 object-cover"
-              loading="lazy"
-            />
-          ) : (
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-3 px-4 py-4 text-sm font-medium text-primary hover:bg-muted/50"
-            >
-              <span
-                className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-xl shrink-0",
-                  isLink ? "bg-emerald-500/15 text-emerald-800" : "bg-amber-500/15 text-amber-800"
-                )}
+      {evidencias.length > 0 && (
+        <div className="mb-3 space-y-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground px-0.5">
+            Soportes ({evidencias.length})
+          </p>
+          {evidencias.map((item) => {
+            const itemIsLink = item.kind === "link" || isLinkEvidence(item.url, item.kind);
+            const itemIsVideo = item.kind === "video" || isVideoUrl(item.url);
+            const itemStored = isSupabaseEvidencia(item.url);
+            return (
+              <div
+                key={item.id}
+                className="rounded-xl overflow-hidden border border-border bg-muted/30"
               >
-                {isLink ? <Link2 className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
-              </span>
-              <span className="min-w-0">
-                <span className="block font-semibold truncate">
-                  {isLink
-                    ? "Link de evidencia"
-                    : isPdfUrl(url)
-                      ? "Documento PDF"
-                      : "Documento de soporte"}
-                </span>
-                <span className="block text-[11px] text-muted-foreground truncate">
-                  {isLink
-                    ? `${linkDisplayHost(url)} · tocar para abrir`
-                    : `.${fileExt(url) || "archivo"} · tocar para abrir`}
-                </span>
-              </span>
-              <ExternalLink className="w-4 h-4 shrink-0 ml-auto" />
-            </a>
-          )}
-          <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] border-t border-border bg-card">
-            {storedDoc ? (
-              <>
-                <FileCheck2 className="w-3.5 h-3.5 text-success shrink-0" />
-                <span className="text-muted-foreground">
-                  {stand ? "Foto del stand guardada" : "Guardado como archivo en el evento"}
-                </span>
-              </>
-            ) : isLink ? (
-              <>
-                <Link2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                <span className="text-muted-foreground truncate">
-                  Link externo guardado · {linkDisplayHost(url)}
-                </span>
-              </>
-            ) : (
-              <>
-                <ExternalLink className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span className="text-amber-700 dark:text-amber-400">
-                  Link externo — vuelve a subirlo para guardarlo en CTW
-                </span>
-              </>
-            )}
-          </div>
+                {itemIsVideo ? (
+                  <video
+                    src={item.url}
+                    controls
+                    playsInline
+                    className="w-full max-h-48 bg-black object-contain"
+                  />
+                ) : isImageUrl(item.url) && !itemIsLink ? (
+                  <img
+                    src={item.url}
+                    alt={`Soporte ${task.marca}`}
+                    className="w-full max-h-48 object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-3 px-4 py-4 text-sm font-medium text-primary hover:bg-muted/50"
+                  >
+                    <span
+                      className={cn(
+                        "flex h-10 w-10 items-center justify-center rounded-xl shrink-0",
+                        itemIsLink
+                          ? "bg-emerald-500/15 text-emerald-800"
+                          : "bg-amber-500/15 text-amber-800"
+                      )}
+                    >
+                      {itemIsLink ? (
+                        <Link2 className="w-5 h-5" />
+                      ) : (
+                        <FileText className="w-5 h-5" />
+                      )}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block font-semibold truncate">
+                        {item.label ||
+                          (itemIsLink
+                            ? "Link de evidencia"
+                            : isPdfUrl(item.url)
+                              ? "Documento PDF"
+                              : "Documento de soporte")}
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground truncate">
+                        {itemIsLink
+                          ? `${linkDisplayHost(item.url)} · tocar para abrir`
+                          : `.${fileExt(item.url) || "archivo"} · tocar para abrir`}
+                      </span>
+                    </span>
+                    <ExternalLink className="w-4 h-4 shrink-0 ml-auto" />
+                  </a>
+                )}
+                <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] border-t border-border bg-card">
+                  <span className="rounded-md bg-muted px-1.5 py-0.5 font-semibold text-muted-foreground">
+                    {evidenceKindLabel(item.kind)}
+                  </span>
+                  {itemStored ? (
+                    <>
+                      <FileCheck2 className="w-3.5 h-3.5 text-success shrink-0" />
+                      <span className="text-muted-foreground truncate">Archivo en el evento</span>
+                    </>
+                  ) : itemIsLink ? (
+                    <>
+                      <Link2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                      <span className="text-muted-foreground truncate">
+                        {linkDisplayHost(item.url)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground truncate">Link externo</span>
+                  )}
+                  {canEditEvidence && (
+                    <button
+                      type="button"
+                      onClick={() => void handleRemoveItem(item.id)}
+                      disabled={busy}
+                      className="ml-auto inline-flex items-center gap-1 text-destructive font-semibold disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3 h-3" /> Quitar
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -837,82 +895,90 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
 
         {!stand && hasEvidence && canEditEvidence && (
           <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => cameraRef.current?.click()}
-              disabled={busy}
-              className="flex-1 min-w-[7rem] flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
-            >
-              {uploading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <>
-                  <RefreshCw className="w-4 h-4" /> Cambiar
-                </>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => galleryRef.current?.click()}
-              disabled={busy}
-              className="px-3 py-2.5 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
-            >
-              Galería
-            </button>
-            <button
-              type="button"
-              onClick={() => docRef.current?.click()}
-              disabled={busy}
-              className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-border disabled:opacity-50"
-              title="Subir documento"
-            >
-              <FileText className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowLinkInput((v) => !v);
-                setLinkDraft(url);
-              }}
-              disabled={busy}
-              className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-border disabled:opacity-50"
-              title="Pegar o cambiar link"
-            >
-              <Link2 className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleRemove()}
-              disabled={busy}
-              className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-50"
-              title="Quitar evidencia"
-            >
-              {removing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-            </button>
-          </div>
-          {showLinkInput && (
-            <div className="space-y-2 rounded-xl border border-border p-3 bg-muted/20">
-              <input
-                type="url"
-                inputMode="url"
-                autoCapitalize="off"
-                autoCorrect="off"
-                placeholder="https://…"
-                value={linkDraft}
-                onChange={(e) => setLinkDraft(e.target.value)}
-                className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
-              />
+            <p className="text-[10px] text-muted-foreground leading-snug">
+              Puedes agregar más soportes (ej. captura + link del post) sin reemplazar lo que ya
+              está.
+            </p>
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void handleSaveLink()}
-                disabled={busy || !linkDraft.trim()}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold gradient-primary text-primary-foreground disabled:opacity-50"
+                onClick={() => cameraRef.current?.click()}
+                disabled={busy}
+                className="flex-1 min-w-[7rem] flex items-center justify-center gap-2 font-semibold text-sm py-2.5 rounded-xl border border-border bg-card hover:bg-muted disabled:opacity-50"
               >
-                {savingLink ? "Guardando…" : "Guardar link"}
+                {uploading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Camera className="w-4 h-4" /> Agregar foto
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => galleryRef.current?.click()}
+                disabled={busy}
+                className="px-3 py-2.5 rounded-xl text-xs font-semibold bg-accent text-accent-foreground disabled:opacity-50"
+              >
+                Galería
+              </button>
+              <button
+                type="button"
+                onClick={() => docRef.current?.click()}
+                disabled={busy}
+                className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-border disabled:opacity-50"
+                title="Subir documento"
+              >
+                <FileText className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkInput((v) => !v);
+                  setLinkDraft("");
+                }}
+                disabled={busy}
+                className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-border disabled:opacity-50 inline-flex items-center gap-1"
+                title="Agregar link"
+              >
+                <Link2 className="w-4 h-4" /> Link
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRemove()}
+                disabled={busy}
+                className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                title="Quitar todos los soportes"
+              >
+                {removing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
               </button>
             </div>
-          )}
+            {showLinkInput && (
+              <div className="space-y-2 rounded-xl border border-border p-3 bg-muted/20">
+                <input
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  placeholder="https://instagram.com/… o Drive, nota de prensa…"
+                  value={linkDraft}
+                  onChange={(e) => setLinkDraft(e.target.value)}
+                  className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveLink()}
+                  disabled={busy || !linkDraft.trim()}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold gradient-primary text-primary-foreground disabled:opacity-50"
+                >
+                  {savingLink ? "Guardando…" : "Agregar link"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 

@@ -1,13 +1,20 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
   FLUJO_STAND_RECEPCION,
-  assertHalfHourStandSlot,
   assertSponsorAfterCtw,
   findStandEntregaConflicts,
   formatStandConflictMessage,
   isStandRecepcion,
   resolveStandStatusAfterEdit,
 } from "@/lib/standRecepcion";
+import {
+  listEvidencias,
+  newEvidenceId,
+  primaryFields,
+  type EvidenceItem,
+  type EvidenceKind,
+} from "@/lib/evidencias";
+import type { Json } from "@/integrations/supabase/types";
 
 const BUCKET = "evidencias";
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -154,6 +161,10 @@ type TaskStandFields = {
   tipo_beneficio: string | null;
   category: string | null;
   evidencia_url: string | null;
+  evidencias?: unknown;
+  media_type?: string | null;
+  hora_subida?: string | null;
+  subido_por?: string | null;
   acta_recepcion_url: string | null;
   entrega_ctw_at: string | null;
   entrega_sponsor_at: string | null;
@@ -164,7 +175,7 @@ async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | n
   const { data, error } = await supabase
     .from("tasks")
     .select(
-      "flujo, event_id, tipo_beneficio, category, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, status"
+      "flujo, event_id, tipo_beneficio, category, evidencia_url, evidencias, media_type, hora_subida, subido_por, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, status"
     )
     .eq("id", taskId)
     .maybeSingle();
@@ -173,6 +184,33 @@ async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | n
     return null;
   }
   return data as TaskStandFields | null;
+}
+
+function evidenciasPayload(items: EvidenceItem[]): Json {
+  return items as unknown as Json;
+}
+
+async function persistEvidencias(
+  taskId: string,
+  items: EvidenceItem[],
+  uploaderName: string,
+  statusPatch: Record<string, unknown>
+) {
+  const primary = primaryFields(items);
+  const { error } = await supabase
+    .from("tasks")
+    .update({
+      evidencias: evidenciasPayload(items),
+      evidencia_url: primary.evidencia_url,
+      media_type: primary.media_type,
+      subido_por: uploaderName,
+      hora_subida: new Date().toISOString(),
+      edited_at: new Date().toISOString(),
+      ...statusPatch,
+    })
+    .eq("id", taskId);
+  if (error) throw error;
+  return primary.evidencia_url;
 }
 
 function taskIsStandFlow(t: TaskStandFields | null): boolean {
@@ -231,7 +269,7 @@ export async function uploadEvidencia(
   file: File,
   uploaderName: string,
   eventId?: string,
-  previousUrl?: string | null
+  _previousUrl?: string | null
 ) {
   if (!isAllowedEvidenceFile(file)) {
     throw new Error(
@@ -242,8 +280,15 @@ export async function uploadEvidencia(
     throw new Error("El archivo supera 50 MB");
   }
 
-  if (previousUrl && isSupabaseEvidencia(previousUrl)) {
-    await deleteStorageObject(previousUrl);
+  const current = await fetchTaskStandFields(taskId);
+  const isStand = taskIsStandFlow(current);
+  const existing = listEvidencias(current || {});
+
+  // Stands: una sola foto principal (reemplaza archivo previo, conserva links si hubiera)
+  if (isStand) {
+    for (const item of existing.filter((e) => e.kind !== "link" && isSupabaseEvidencia(e.url))) {
+      await deleteStorageObject(item.url);
+    }
   }
 
   const ext =
@@ -262,29 +307,32 @@ export async function uploadEvidencia(
 
   const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = urlData.publicUrl;
-  const mediaType = detectMediaType(file);
-  const current = await fetchTaskStandFields(taskId);
+  const mediaType = detectMediaType(file) as EvidenceKind;
+
+  const item: EvidenceItem = {
+    id: newEvidenceId(),
+    url: publicUrl,
+    kind: mediaType,
+    label: file.name,
+    added_at: new Date().toISOString(),
+    added_by: uploaderName,
+  };
+
+  const next = isStand
+    ? [...existing.filter((e) => e.kind === "link"), item]
+    : [...existing, item];
+
   const resolved = resolveStatusAfterPhoto(current, publicUrl);
 
-  const { error: updateError } = await supabase
-    .from("tasks")
-    .update({
-      evidencia_url: publicUrl,
-      media_type: mediaType,
-      subido_por: uploaderName,
-      hora_subida: new Date().toISOString(),
+  try {
+    await persistEvidencias(taskId, next, uploaderName, {
       status: resolved.status,
       rejected_at: null,
-      ...(resolved.clearApproved || !taskIsStandFlow(current)
-        ? { approved_at: null }
-        : {}),
-      edited_at: new Date().toISOString(),
-    })
-    .eq("id", taskId);
-
-  if (updateError) {
+      ...(resolved.clearApproved || !isStand ? { approved_at: null } : {}),
+    });
+  } catch (err) {
     await deleteStorageObject(path);
-    throw updateError;
+    throw err;
   }
 
   return publicUrl;
@@ -294,7 +342,7 @@ export async function saveEvidenciaLink(
   taskId: string,
   rawUrl: string,
   uploaderName: string,
-  previousUrl?: string | null
+  _previousUrl?: string | null
 ) {
   const url = normalizeEvidenceLink(rawUrl);
   const current = await fetchTaskStandFields(taskId);
@@ -302,39 +350,99 @@ export async function saveEvidenciaLink(
     throw new Error("En stands la evidencia principal debe ser una foto, no un link.");
   }
 
-  if (previousUrl && isSupabaseEvidencia(previousUrl)) {
-    await deleteStorageObject(previousUrl);
+  const existing = listEvidencias(current || {});
+  if (existing.some((e) => e.url === url)) {
+    throw new Error("Ese link ya está guardado en este beneficio");
   }
 
-  const { error } = await supabase
-    .from("tasks")
-    .update({
-      evidencia_url: url,
-      media_type: "link",
-      subido_por: uploaderName,
-      hora_subida: new Date().toISOString(),
-      status: "por_validar",
-      rejected_at: null,
-      approved_at: null,
-      edited_at: new Date().toISOString(),
-    })
-    .eq("id", taskId);
+  const item: EvidenceItem = {
+    id: newEvidenceId(),
+    url,
+    kind: "link",
+    label: linkDisplayHost(url),
+    added_at: new Date().toISOString(),
+    added_by: uploaderName,
+  };
+  const next = [...existing, item];
 
-  if (error) throw error;
+  await persistEvidencias(taskId, next, uploaderName, {
+    status: "por_validar",
+    rejected_at: null,
+    approved_at: null,
+  });
+
   return url;
 }
 
+/** Elimina un soporte concreto (archivo o link) sin borrar los demás. */
+export async function removeEvidenciaItem(taskId: string, itemId: string) {
+  const current = await fetchTaskStandFields(taskId);
+  const existing = listEvidencias(current || {});
+  const target = existing.find((e) => e.id === itemId);
+  if (!target) throw new Error("Soporte no encontrado");
+
+  if (isSupabaseEvidencia(target.url)) {
+    await deleteStorageObject(target.url);
+  }
+
+  const next = existing.filter((e) => e.id !== itemId);
+  const isStand = taskIsStandFlow(current);
+  const primary = primaryFields(next);
+
+  if (!next.length) {
+    const { error } = await supabase
+      .from("tasks")
+      .update({
+        evidencias: [] as unknown as Json,
+        evidencia_url: null,
+        ...(isStand
+          ? {}
+          : {
+              subido_por: null,
+              hora_subida: null,
+              captured_brands: null,
+            }),
+        status: "pendiente",
+        rejected_at: null,
+        approved_at: null,
+        edited_at: new Date().toISOString(),
+      })
+      .eq("id", taskId);
+    if (error) throw error;
+    return;
+  }
+
+  await persistEvidencias(taskId, next, current?.subido_por || "sistema", {
+    status: primary.evidencia_url ? "por_validar" : "pendiente",
+    rejected_at: null,
+    approved_at: null,
+  });
+}
+
 export async function removeEvidencia(taskId: string, currentUrl: string | null | undefined) {
-  if (currentUrl && isSupabaseEvidencia(currentUrl)) {
+  const current = await fetchTaskStandFields(taskId);
+  const existing = listEvidencias(current || {});
+
+  // Si hay lista multi, borrar el ítem que coincide con la URL (o el primario)
+  if (existing.length > 1 && currentUrl) {
+    const hit = existing.find((e) => e.url === currentUrl) || existing[0];
+    await removeEvidenciaItem(taskId, hit.id);
+    return;
+  }
+
+  for (const item of existing) {
+    if (isSupabaseEvidencia(item.url)) await deleteStorageObject(item.url);
+  }
+  if (currentUrl && isSupabaseEvidencia(currentUrl) && !existing.some((e) => e.url === currentUrl)) {
     await deleteStorageObject(currentUrl);
   }
 
-  const current = await fetchTaskStandFields(taskId);
   const isStand = taskIsStandFlow(current);
 
   const { error } = await supabase
     .from("tasks")
     .update({
+      evidencias: [] as unknown as Json,
       evidencia_url: null,
       ...(isStand
         ? {}

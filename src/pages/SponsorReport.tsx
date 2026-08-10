@@ -14,6 +14,8 @@ import {
   hasRequiredEvidence,
   isStandRecepcion,
 } from "@/lib/standRecepcion";
+import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
+import { isLinkEvidence, linkDisplayHost } from "@/lib/upload";
 
 type Task = Tables<"tasks">;
 type Question = Tables<"survey_questions">;
@@ -266,6 +268,7 @@ export default function SponsorReport() {
     () =>
       activeTasks.filter(
         (t) =>
+          listEvidencias(t).length > 0 ||
           !!t.evidencia_url ||
           (isStandRecepcion(t) && !!t.acta_recepcion_url)
       ),
@@ -631,35 +634,45 @@ export default function SponsorReport() {
                           {t.status}
                         </span>
                       </div>
-                      {t.evidencia_url && (
-                        <div className="mt-3">
-                          {/\.(mp4|webm|mov)(\?|$)/i.test(t.evidencia_url) ? (
-                            <video
-                              src={t.evidencia_url}
-                              controls
-                              className="w-full rounded-xl max-h-72 bg-black"
-                            />
-                          ) : canShowAsImage(t.evidencia_url) && t.media_type !== "link" ? (
-                            <img
-                              src={t.evidencia_url}
-                              alt={t.tipo_beneficio}
-                              className="w-full rounded-xl max-h-80 object-contain bg-muted/30"
-                              crossOrigin="anonymous"
-                            />
-                          ) : (
-                            <a
-                              href={t.evidencia_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block rounded-xl border border-border bg-muted/40 px-3 py-3 text-xs text-primary font-semibold truncate"
-                            >
-                              {t.media_type === "link" || !t.evidencia_url.includes("/evidencias/")
-                                ? `Abrir link · ${t.evidencia_url}`
-                                : "Evidencia pendiente de materializar en storage público."}
-                            </a>
-                          )}
-                        </div>
-                      )}
+                      {listEvidencias(t).map((item) => {
+                        const itemIsLink =
+                          item.kind === "link" || isLinkEvidence(item.url, item.kind);
+                        return (
+                          <div key={item.id} className="mt-3">
+                            <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1">
+                              {evidenceKindLabel(item.kind)}
+                              {item.label ? ` · ${item.label}` : ""}
+                            </div>
+                            {/\.(mp4|webm|mov)(\?|$)/i.test(item.url) || item.kind === "video" ? (
+                              <video
+                                src={item.url}
+                                controls
+                                className="w-full rounded-xl max-h-72 bg-black"
+                              />
+                            ) : canShowAsImage(item.url) && !itemIsLink ? (
+                              <img
+                                src={item.url}
+                                alt={t.tipo_beneficio}
+                                className="w-full rounded-xl max-h-80 object-contain bg-muted/30"
+                                crossOrigin="anonymous"
+                              />
+                            ) : (
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block rounded-xl border border-border bg-muted/40 px-3 py-3 text-xs text-primary font-semibold truncate"
+                              >
+                                {itemIsLink
+                                  ? `Abrir link · ${linkDisplayHost(item.url)}`
+                                  : item.url.includes("/evidencias/")
+                                    ? "Abrir archivo"
+                                    : `Abrir · ${item.url}`}
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })}
                       {isStandRecepcion(t) && (
                         <div className="mt-3 space-y-2 text-xs text-muted-foreground">
                           {t.acta_recepcion_url && (

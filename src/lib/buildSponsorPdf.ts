@@ -1,5 +1,6 @@
 import type { Tables } from "@/integrations/supabase/types";
 import { formatEntregaBogota, isStandRecepcion } from "@/lib/standRecepcion";
+import { listEvidencias } from "@/lib/evidencias";
 
 type Task = Tables<"tasks">;
 
@@ -258,8 +259,10 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
 
     if (isStandRecepcion(t)) {
       let cursor = y + 4;
-      if (t.evidencia_url) {
-        cursor = await drawEmbeddedImage(t.evidencia_url, "Foto del stand", cursor, 70);
+      const items = listEvidencias(t);
+      const photo = items.find((i) => i.kind !== "link") || (t.evidencia_url ? { url: t.evidencia_url } : null);
+      if (photo?.url) {
+        cursor = await drawEmbeddedImage(photo.url, "Foto del stand", cursor, 70);
       }
       if (t.acta_recepcion_url) {
         if (cursor > pageH - 80) {
@@ -269,55 +272,46 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
         await drawEmbeddedImage(t.acta_recepcion_url, "Acta de recepción firmada", cursor, 90);
       }
     } else {
-      const imgAreaTop = y + 8;
+      const items = listEvidencias(t);
+      let cursor = y + 8;
       const imgAreaW = pageW - margin * 2;
-      const imgAreaH = pageH - imgAreaTop - 16;
-      const url = t.evidencia_url!;
 
-      if (isVideoUrl(url) || isPdfUrl(url) || t.media_type === "link") {
-        pdf.setFillColor(245, 245, 242);
-        pdf.roundedRect(margin, imgAreaTop, imgAreaW, 40, 3, 3, "F");
-        pdf.setTextColor(40, 40, 40);
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(11);
-        pdf.text(
-          t.media_type === "link"
-            ? "Evidencia en link"
-            : isVideoUrl(url)
-              ? "Evidencia en video"
-              : "Evidencia en PDF",
-          margin + 6,
-          imgAreaTop + 16
-        );
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
-        pdf.setTextColor(100, 100, 100);
-        const note =
-          t.media_type === "link"
-            ? url
-            : isVideoUrl(url)
-              ? "Video incluido en el almacenamiento del evento."
-              : "Documento PDF de soporte incluido en el almacenamiento del evento.";
-        pdf.text(pdf.splitTextToSize(note, imgAreaW - 12), margin + 6, imgAreaTop + 24);
-      } else {
-        const embedded = await urlToDataUrl(url);
-        if (embedded) {
-          const props = pdf.getImageProperties(embedded.dataUrl);
-          const ratio = Math.min(imgAreaW / props.width, imgAreaH / props.height);
-          const w = props.width * ratio;
-          const h = props.height * ratio;
-          const x = margin + (imgAreaW - w) / 2;
-          pdf.addImage(embedded.dataUrl, embedded.format, x, imgAreaTop, w, h, undefined, "FAST");
-        } else {
-          pdf.setFillColor(255, 240, 240);
-          pdf.roundedRect(margin, imgAreaTop, imgAreaW, 36, 3, 3, "F");
-          pdf.setTextColor(160, 40, 40);
-          pdf.setFontSize(10);
+      for (const item of items.length ? items : t.evidencia_url ? [{ url: t.evidencia_url, kind: t.media_type || "photo" }] : []) {
+        if (cursor > pageH - 60) {
+          pdf.addPage();
+          cursor = 24;
+        }
+        const url = item.url;
+        const kind = "kind" in item ? item.kind : t.media_type;
+
+        if (isVideoUrl(url) || isPdfUrl(url) || kind === "link") {
+          pdf.setFillColor(245, 245, 242);
+          pdf.roundedRect(margin, cursor, imgAreaW, 36, 3, 3, "F");
+          pdf.setTextColor(40, 40, 40);
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(11);
           pdf.text(
-            "No se pudo embeber esta evidencia. Re-materialízala en el storage del evento.",
+            kind === "link"
+              ? "Evidencia en link"
+              : isVideoUrl(url)
+                ? "Evidencia en video"
+                : "Evidencia en PDF",
             margin + 6,
-            imgAreaTop + 18
+            cursor + 14
           );
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 100, 100);
+          const note =
+            kind === "link"
+              ? url
+              : isVideoUrl(url)
+                ? "Video incluido en el almacenamiento del evento."
+                : "Documento PDF de soporte incluido en el almacenamiento del evento.";
+          pdf.text(pdf.splitTextToSize(note, imgAreaW - 12), margin + 6, cursor + 22);
+          cursor += 44;
+        } else {
+          cursor = await drawEmbeddedImage(url, "Soporte", cursor, 70);
         }
       }
     }

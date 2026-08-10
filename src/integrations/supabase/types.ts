@@ -128,6 +128,7 @@ export type Database = {
           firma_nombre: string | null;
           entrega_ctw_at: string | null;
           entrega_sponsor_at: string | null;
+          evidencias: Json;
           approved_at: string | null;
           rejected_at: string | null;
           edited_at: string | null;
@@ -163,6 +164,7 @@ export type Database = {
           firma_nombre?: string | null;
           entrega_ctw_at?: string | null;
           entrega_sponsor_at?: string | null;
+          evidencias?: Json;
           approved_at?: string | null;
           rejected_at?: string | null;
           edited_at?: string | null;
@@ -198,6 +200,7 @@ export type Database = {
           firma_nombre?: string | null;
           entrega_ctw_at?: string | null;
           entrega_sponsor_at?: string | null;
+          evidencias?: Json;
           approved_at?: string | null;
           rejected_at?: string | null;
           edited_at?: string | null;
