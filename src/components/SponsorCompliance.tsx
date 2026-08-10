@@ -1900,7 +1900,7 @@ const EditBenefitDialog = ({
                 Recepción de stand
               </div>
               <p className="text-[10px] text-muted-foreground">
-                Horarios cada 30 min. No pueden coincidir con otro stand.
+                Horarios: Pulpo→CTW puede repetirse; entrega al sponsor ≥59 min después y sin cruces.
               </p>
               {task.acta_recepcion_url && (
                 <a

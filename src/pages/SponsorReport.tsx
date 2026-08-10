@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { BRAND_GROUPS, unifyBrand } from "@/lib/brands";
 import { FASES, FASE_LABEL, getFase, type Fase } from "@/lib/fases";
 import type { Tables } from "@/integrations/supabase/types";
-import { FileDown, Loader2, Lock } from "lucide-react";
+import { ArrowLeft, FileDown, Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { buildSponsorEvidencePdf } from "@/lib/buildSponsorPdf";
@@ -83,7 +83,12 @@ const DEFAULT_QUESTIONS = [
 
 export default function SponsorReport() {
   const { token } = useParams<{ token: string }>();
+  const navigate = useNavigate();
   const reportRef = useRef<HTMLDivElement>(null);
+
+  const goHome = () => {
+    navigate("/", { replace: false });
+  };
 
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -336,7 +341,7 @@ export default function SponsorReport() {
       return;
     }
     if (!allApproved) {
-      toast.error("El PDF se habilita cuando todos los beneficios están aprobados");
+      toast.error("El PDF se habilita cuando todos los beneficios estan aprobados");
       return;
     }
     setPdfBusy(true);
@@ -350,15 +355,39 @@ export default function SponsorReport() {
           value: a.value,
         })),
       });
+      const filename = `informe_${sponsorName.replace(/\s+/g, "_")}_${eventName.replace(/\s+/g, "_")}.pdf`;
+      const file = new File([blob], filename, { type: "application/pdf" });
+
+      // En iOS/PWA preferir share: evita que el visor de PDF reemplace la app.
+      const nav = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean;
+      };
+      if (typeof navigator.share === "function" && nav.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Informe ${sponsorName}`,
+            text: `Informe de evidencias · ${eventName}`,
+          });
+          toast.success("PDF listo para compartir");
+          return;
+        } catch (shareErr) {
+          // Usuario canceló el share → no es error
+          if ((shareErr as Error)?.name === "AbortError") return;
+        }
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `informe_${sponsorName.replace(/\s+/g, "_")}_${eventName.replace(/\s+/g, "_")}.pdf`;
+      a.download = filename;
+      a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
-      toast.success("PDF listo — encuesta + evidencias");
+      // Revocar un poco después para no romper descargas lentas
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      toast.success("PDF descargado — puedes seguir en esta pantalla");
     } catch (e) {
       console.error(e);
       toast.error("No se pudo generar el PDF");
@@ -377,12 +406,21 @@ export default function SponsorReport() {
 
   if (notFound) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <div className="max-w-md text-center">
-          <h1 className="text-2xl font-bold">Informe no encontrado</h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            El link es inválido o ya no está disponible.
-          </p>
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="px-4 pt-4 safe-top">
+          <BackLink onBack={goHome} />
+        </div>
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-md text-center">
+            <h1 className="text-2xl font-bold">Informe no encontrado</h1>
+            <p className="text-sm text-muted-foreground mt-2">
+              El link es inválido o ya no está disponible.
+            </p>
+            <Button className="mt-6" variant="outline" onClick={goHome}>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Volver a la app
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -394,16 +432,17 @@ export default function SponsorReport() {
       <div className="min-h-screen bg-background">
         <header className="gradient-hero text-white px-5 safe-top pb-8">
           <div className="max-w-lg mx-auto">
-            <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-white/60">
+            <BackLink onBack={goHome} light />
+            <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-white/60 mt-4">
               <Lock className="w-3.5 h-3.5" />
               Colombia Tech Week
             </div>
-            <h1 className="text-2xl font-bold mt-2">{surveyTitle}</h1>
-            <p className="text-sm text-white/70 mt-2">
+            <h1 className="text-2xl font-bold mt-3">{surveyTitle || "Encuesta"}</h1>
+            <p className="text-sm text-white/75 mt-2">
               {surveyDesc ||
                 `Antes de ver el informe de ${sponsorName}, responde esta breve encuesta.`}
             </p>
-            <p className="text-xs text-primary mt-3 font-semibold">
+            <p className="text-xs text-white/55 mt-3">
               El documento e informe permanecen bloqueados hasta que envíes la encuesta.
             </p>
           </div>
@@ -527,32 +566,35 @@ export default function SponsorReport() {
   return (
     <div className="min-h-screen bg-background">
       <header className="gradient-hero text-white px-5 safe-top pb-8">
-        <div className="max-w-3xl mx-auto flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-white/60">{eventName}</div>
-            <h1 className="text-3xl font-bold mt-1">Informe · {sponsorName}</h1>
-            <p className="text-sm text-white/70 mt-2">
-              {approvedOrEvidence.length} evidencias · {activeTasks.length} beneficios
-              {allComplete ? " · Completo" : " · En progreso"}
-            </p>
+        <div className="max-w-3xl mx-auto">
+          <BackLink onBack={goHome} light />
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-[0.2em] text-white/60">{eventName}</div>
+              <h1 className="text-3xl font-bold mt-1">Informe · {sponsorName}</h1>
+              <p className="text-sm text-white/70 mt-2">
+                {approvedOrEvidence.length} evidencias · {activeTasks.length} beneficios
+                {allComplete ? " · Completo" : " · En progreso"}
+              </p>
+            </div>
+            <Button
+              onClick={() => void downloadPdf()}
+              disabled={!allApproved || pdfBusy}
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              title={
+                allApproved
+                  ? "Descargar PDF (incluye encuesta)"
+                  : "Disponible cuando todos los beneficios estén aprobados"
+              }
+            >
+              {pdfBusy ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : (
+                <FileDown className="w-4 h-4 mr-2" />
+              )}
+              Descargar PDF
+            </Button>
           </div>
-          <Button
-            onClick={() => void downloadPdf()}
-            disabled={!allApproved || pdfBusy}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-            title={
-              allApproved
-                ? "Descargar PDF (incluye encuesta)"
-                : "Disponible cuando todos los beneficios estén aprobados"
-            }
-          >
-            {pdfBusy ? (
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            ) : (
-              <FileDown className="w-4 h-4 mr-2" />
-            )}
-            Descargar PDF
-          </Button>
         </div>
       </header>
 
@@ -656,5 +698,21 @@ export default function SponsorReport() {
         </div>
       </main>
     </div>
+  );
+}
+
+function BackLink({ onBack, light }: { onBack: () => void; light?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onBack}
+      className={cn(
+        "inline-flex items-center gap-1.5 text-sm font-medium transition-opacity hover:opacity-80",
+        light ? "text-white/85" : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+      <ArrowLeft className="w-4 h-4" />
+      Volver a la app
+    </button>
   );
 }

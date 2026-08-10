@@ -1,15 +1,37 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTasks, STATUS, type Task } from "@/hooks/useTasks";
 import { TaskCard } from "./TaskCard";
 import { unifyBrand } from "@/lib/brands";
 import { Input } from "@/components/ui/input";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  ChevronDown,
+  ChevronRight,
+  LayoutGrid,
+  LayoutList,
+  Search,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 interface Props {
   responsable: string;
   uploaderName: string;
   relevoOf?: string;
+}
+
+type ViewMode = "lista" | "tarjetas";
+
+const VIEW_KEY = "ctw-field-sponsors-view";
+
+function loadViewMode(): ViewMode {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === "lista" || v === "tarjetas") return v;
+  } catch {
+    /* ignore */
+  }
+  return "lista";
 }
 
 function statusPriority(t: Task): number {
@@ -19,10 +41,30 @@ function statusPriority(t: Task): number {
   return 3;
 }
 
+function statusChip(t: Task) {
+  if (t.status === STATUS.APPROVED)
+    return { label: "OK", cls: "bg-success/15 text-success" };
+  if (t.status === STATUS.REVIEW)
+    return { label: "Subido", cls: "bg-primary/15 text-primary" };
+  if (t.status === STATUS.REJECTED)
+    return { label: "Rechazo", cls: "bg-destructive/15 text-destructive" };
+  return { label: "Pendiente", cls: "bg-muted text-muted-foreground" };
+}
+
 export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
   const { tasks, loading } = useTasks(responsable);
   const [search, setSearch] = useState("");
   const [openSponsors, setOpenSponsors] = useState<Record<string, boolean>>({});
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, viewMode);
+    } catch {
+      /* ignore */
+    }
+  }, [viewMode]);
 
   const completed = useMemo(
     () =>
@@ -61,6 +103,27 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0], "es"));
   }, [tasks, search]);
 
+  const isOpen = (sponsor: string) => {
+    if (openSponsors[sponsor] !== undefined) return !!openSponsors[sponsor];
+    return search.trim().length > 0;
+  };
+
+  const toggle = (sponsor: string) =>
+    setOpenSponsors((s) => ({ ...s, [sponsor]: !isOpen(sponsor) }));
+
+  const expandAll = () => {
+    const next: Record<string, boolean> = {};
+    for (const [s] of grouped) next[s] = true;
+    setOpenSponsors(next);
+  };
+
+  const collapseAll = () => {
+    const next: Record<string, boolean> = {};
+    for (const [s] of grouped) next[s] = false;
+    setOpenSponsors(next);
+    setExpandedId(null);
+  };
+
   if (loading) {
     return (
       <div className="p-6 text-center text-muted-foreground text-sm">
@@ -77,19 +140,144 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
     );
   }
 
-  const toggle = (sponsor: string) =>
-    setOpenSponsors((s) => ({ ...s, [sponsor]: !(s[sponsor] ?? false) }));
+  const renderBenefitRow = (t: Task) => {
+    const rowOpen = expandedId === t.id;
+    const chip = statusChip(t);
+    return (
+      <li key={t.id} className="border-t border-border/70">
+        <button
+          type="button"
+          className="w-full flex items-start gap-2 px-3 py-2.5 text-left hover:bg-muted/30"
+          onClick={() => setExpandedId(rowOpen ? null : t.id)}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold leading-snug line-clamp-2">
+              {displayBeneficioLabel(t.tipo_beneficio)}
+            </div>
+            {t.is_timed && t.hora && (
+              <div className="text-[10px] text-muted-foreground mt-0.5">
+                {t.dia} · {t.hora}
+              </div>
+            )}
+          </div>
+          <span
+            className={cn(
+              "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0",
+              chip.cls
+            )}
+          >
+            {chip.label}
+          </span>
+          {rowOpen ? (
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+          )}
+        </button>
+        {rowOpen && (
+          <div className="px-3 pb-3">
+            <TaskCard task={t} uploaderName={uploaderName} relevoOf={relevoOf} />
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  const renderSponsorGroup = (sponsor: string, items: Task[], asCard: boolean) => {
+    const open = isOpen(sponsor);
+    const done = items.filter(
+      (t) => t.status === STATUS.REVIEW || t.status === STATUS.APPROVED
+    ).length;
+    const pending = items.length - done;
+
+    return (
+      <section
+        key={sponsor}
+        className={cn(
+          "overflow-hidden bg-card border border-border h-full",
+          asCard ? "rounded-2xl shadow-sm" : "border-x-0 border-t-0 last:border-b-0"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => toggle(sponsor)}
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-left bg-muted/40 hover:bg-muted/60 transition-colors"
+        >
+          {open ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold truncate">{sponsor}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              {done}/{items.length} listos
+              {pending > 0 ? ` · ${pending} pendientes` : ""}
+            </div>
+          </div>
+          <span
+            className={cn(
+              "text-[10px] font-bold uppercase px-2 py-0.5 rounded-full shrink-0",
+              pending === 0
+                ? "bg-success/15 text-success"
+                : "bg-muted text-muted-foreground"
+            )}
+          >
+            {pending === 0 ? "OK" : `${pending}`}
+          </span>
+        </button>
+
+        {open && (
+          <ul className="divide-y-0">{items.map((t) => renderBenefitRow(t))}</ul>
+        )}
+      </section>
+    );
+  };
 
   return (
     <div className="space-y-4 pb-24">
-      <div className="card-task !p-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs uppercase font-semibold text-muted-foreground">
-            Progreso
-          </span>
-          <span className="text-sm font-bold">
-            {completed} / {tasks.length}
-          </span>
+      <div className="card-task !p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+              Mis sponsors
+            </div>
+            <div className="text-lg font-bold mt-0.5">
+              {grouped.length} sponsor{grouped.length === 1 ? "" : "s"} · {tasks.length}{" "}
+              beneficios
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {completed}/{tasks.length} con soporte cargado
+            </div>
+          </div>
+          <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+            <button
+              type="button"
+              onClick={() => setViewMode("lista")}
+              className={cn(
+                "px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1",
+                viewMode === "lista"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-muted"
+              )}
+              aria-label="Vista lista"
+            >
+              <LayoutList className="w-3.5 h-3.5" /> Lista
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("tarjetas")}
+              className={cn(
+                "px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 border-l border-border",
+                viewMode === "tarjetas"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-muted"
+              )}
+              aria-label="Vista tarjetas"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" /> Tarjetas
+            </button>
+          </div>
         </div>
         <div className="h-2 bg-secondary rounded-full overflow-hidden">
           <div
@@ -99,85 +287,58 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
             }}
           />
         </div>
-        <p className="text-[11px] text-muted-foreground mt-2">
-          {grouped.length} sponsor{grouped.length === 1 ? "" : "s"}
-          {search.trim() ? " con este filtro" : " asignados"}
-        </p>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar sponsor o beneficio…"
-          className="pl-9 h-11"
-        />
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1 min-w-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar sponsor o beneficio…"
+            className="pl-9 h-10"
+          />
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-10 flex-1 sm:flex-none min-w-[6.5rem]"
+            onClick={expandAll}
+          >
+            Expandir
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-10 flex-1 sm:flex-none min-w-[6.5rem]"
+            onClick={collapseAll}
+          >
+            Colapsar
+          </Button>
+        </div>
       </div>
 
-      {grouped.length === 0 && (
-        <div className="py-10 text-center text-sm text-muted-foreground">
+      {grouped.length === 0 ? (
+        <div className="py-10 text-center text-sm text-muted-foreground rounded-2xl border border-border bg-card">
           Ningún sponsor coincide con “{search.trim()}”.
         </div>
+      ) : viewMode === "lista" ? (
+        <>
+          <div className="rounded-2xl border border-border overflow-hidden bg-card md:hidden">
+            {grouped.map(([sponsor, items]) => renderSponsorGroup(sponsor, items, false))}
+          </div>
+          <div className="hidden md:grid md:grid-cols-2 gap-3">
+            {grouped.map(([sponsor, items]) => renderSponsorGroup(sponsor, items, true))}
+          </div>
+        </>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {grouped.map(([sponsor, items]) => renderSponsorGroup(sponsor, items, true))}
+        </div>
       )}
-
-      <div className="space-y-2">
-        {grouped.map(([sponsor, items]) => {
-          const isOpen = openSponsors[sponsor] ?? (search.trim().length > 0);
-          const done = items.filter(
-            (t) => t.status === STATUS.REVIEW || t.status === STATUS.APPROVED
-          ).length;
-          const pending = items.length - done;
-          return (
-            <section
-              key={sponsor}
-              className="rounded-2xl border border-border bg-card overflow-hidden"
-            >
-              <button
-                type="button"
-                onClick={() => toggle(sponsor)}
-                className="w-full flex items-center gap-2 px-3 py-3 text-left hover:bg-muted/40 transition-colors"
-              >
-                {isOpen ? (
-                  <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium text-muted-foreground truncate">{sponsor}</div>
-                  <div className="text-[10px] text-muted-foreground/80 mt-0.5">
-                    {done}/{items.length} listos
-                    {pending > 0 ? ` · ${pending} pendientes` : ""}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    "text-[10px] font-bold uppercase px-2 py-0.5 rounded-full shrink-0",
-                    pending === 0
-                      ? "bg-success/15 text-success"
-                      : "bg-muted text-muted-foreground"
-                  )}
-                >
-                  {pending === 0 ? "OK" : `${pending}`}
-                </span>
-              </button>
-
-              {isOpen && (
-                <div className="px-3 pb-3 space-y-3 border-t border-border/70 pt-3">
-                  {items.map((t) => (
-                    <TaskCard
-                      key={t.id}
-                      task={t}
-                      uploaderName={uploaderName}
-                      relevoOf={relevoOf}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-          );
-        })}
-      </div>
     </div>
   );
 };

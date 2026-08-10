@@ -2,10 +2,11 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   FLUJO_STAND_RECEPCION,
   assertHalfHourStandSlot,
+  assertSponsorAfterCtw,
   findStandEntregaConflicts,
   formatStandConflictMessage,
   isStandRecepcion,
-  statusForStandProgress,
+  resolveStandStatusAfterEdit,
 } from "@/lib/standRecepcion";
 
 const BUCKET = "evidencias";
@@ -156,13 +157,14 @@ type TaskStandFields = {
   acta_recepcion_url: string | null;
   entrega_ctw_at: string | null;
   entrega_sponsor_at: string | null;
+  status: string | null;
 };
 
 async function fetchTaskStandFields(taskId: string): Promise<TaskStandFields | null> {
   const { data, error } = await supabase
     .from("tasks")
     .select(
-      "flujo, event_id, tipo_beneficio, category, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at"
+      "flujo, event_id, tipo_beneficio, category, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, status"
     )
     .eq("id", taskId)
     .maybeSingle();
@@ -188,8 +190,8 @@ export async function assertStandEntregasAvailable(
   entregaCtwAt: string | null,
   entregaSponsorAt: string | null
 ) {
-  assertHalfHourStandSlot(entregaCtwAt, "Entrega a Colombia Tech");
-  assertHalfHourStandSlot(entregaSponsorAt, "Entrega al sponsor");
+  // No forzamos slots de 10 min en entrega al sponsor: el mínimo es CTW+59 min exactos.
+  assertSponsorAfterCtw(entregaCtwAt, entregaSponsorAt);
 
   const { data, error } = await supabase
     .from("tasks")
@@ -212,16 +214,16 @@ export async function assertStandEntregasAvailable(
 function resolveStatusAfterPhoto(
   current: TaskStandFields | null,
   evidenciaUrl: string
-): string {
+): { status: string; clearApproved: boolean } {
   if (taskIsStandFlow(current)) {
-    return statusForStandProgress({
+    return resolveStandStatusAfterEdit(current?.status, {
       evidencia_url: evidenciaUrl,
       acta_recepcion_url: current?.acta_recepcion_url ?? null,
       entrega_ctw_at: current?.entrega_ctw_at ?? null,
       entrega_sponsor_at: current?.entrega_sponsor_at ?? null,
     });
   }
-  return "por_validar";
+  return { status: "por_validar", clearApproved: false };
 }
 
 export async function uploadEvidencia(
@@ -262,7 +264,7 @@ export async function uploadEvidencia(
   const publicUrl = urlData.publicUrl;
   const mediaType = detectMediaType(file);
   const current = await fetchTaskStandFields(taskId);
-  const nextStatus = resolveStatusAfterPhoto(current, publicUrl);
+  const resolved = resolveStatusAfterPhoto(current, publicUrl);
 
   const { error: updateError } = await supabase
     .from("tasks")
@@ -271,9 +273,11 @@ export async function uploadEvidencia(
       media_type: mediaType,
       subido_por: uploaderName,
       hora_subida: new Date().toISOString(),
-      status: nextStatus,
+      status: resolved.status,
       rejected_at: null,
-      approved_at: null,
+      ...(resolved.clearApproved || !taskIsStandFlow(current)
+        ? { approved_at: null }
+        : {}),
       edited_at: new Date().toISOString(),
     })
     .eq("id", taskId);
@@ -379,7 +383,7 @@ export async function uploadActaRecepcion(
   const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const publicUrl = urlData.publicUrl;
   const current = await fetchTaskStandFields(taskId);
-  const nextStatus = statusForStandProgress({
+  const resolved = resolveStandStatusAfterEdit(current?.status, {
     evidencia_url: current?.evidencia_url ?? null,
     acta_recepcion_url: publicUrl,
     entrega_ctw_at: current?.entrega_ctw_at ?? null,
@@ -394,9 +398,9 @@ export async function uploadActaRecepcion(
       firma_nombre: firmaNombre.trim() || null,
       subido_por: uploaderName,
       hora_subida: new Date().toISOString(),
-      status: nextStatus,
+      status: resolved.status,
       rejected_at: null,
-      approved_at: null,
+      ...(resolved.clearApproved ? { approved_at: null } : {}),
       edited_at: new Date().toISOString(),
     })
     .eq("id", taskId);
@@ -465,10 +469,10 @@ export async function updateStandEntregas(
   }
 
   if (taskIsStandFlow(current) || updates.flujo === FLUJO_STAND_RECEPCION) {
-    const nextStatus = statusForStandProgress(patch);
-    updates.status = nextStatus;
+    const resolved = resolveStandStatusAfterEdit(current?.status, patch);
+    updates.status = resolved.status;
     updates.rejected_at = null;
-    if (nextStatus === "pendiente") updates.approved_at = null;
+    if (resolved.clearApproved) updates.approved_at = null;
   }
 
   const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);

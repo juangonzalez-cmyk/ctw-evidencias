@@ -2,12 +2,12 @@ import { lazy, Suspense, useState } from "react";
 import { type Profile } from "@/data/profiles";
 import { ThemeToggle } from "./ThemeToggle";
 import { InstallAppButton } from "./InstallAppButton";
+import { RefreshAppButton } from "./RefreshAppButton";
 import { useEvent } from "@/context/EventContext";
 import {
   LogOut,
   Building2,
   CalendarClock,
-  ClipboardCheck,
   BarChart3,
   MailWarning,
   Settings,
@@ -20,9 +20,6 @@ const TaskList = lazy(() =>
 const Agenda = lazy(() =>
   import("./Agenda").then((m) => ({ default: m.Agenda }))
 );
-const ControlPanel = lazy(() =>
-  import("./ControlPanel").then((m) => ({ default: m.ControlPanel }))
-);
 const SponsorsBoard = lazy(() =>
   import("./SponsorsBoard").then((m) => ({ default: m.SponsorsBoard }))
 );
@@ -30,6 +27,9 @@ const PendingByResponsible = lazy(() =>
   import("./PendingByResponsible").then((m) => ({
     default: m.PendingByResponsible,
   }))
+);
+const CoordCalendar = lazy(() =>
+  import("./CoordCalendar").then((m) => ({ default: m.CoordCalendar }))
 );
 const AdminPanel = lazy(() =>
   import("./AdminPanel").then((m) => ({ default: m.AdminPanel }))
@@ -40,7 +40,7 @@ interface Props {
   onChangeProfile: () => void;
 }
 
-type Tab = "sponsors" | "agenda" | "control" | "cumplimiento" | "pendientes" | "config";
+type Tab = "sponsors" | "agenda" | "cumplimiento" | "calendario" | "pendientes" | "config";
 
 const TabFallback = () => (
   <div className="py-16 flex justify-center">
@@ -52,7 +52,10 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
   const { event } = useEvent();
   const [tab, setTab] = useState<Tab>(profile.is_coordinator ? "cumplimiento" : "sponsors");
   const isCoord = !!profile.is_coordinator;
-  const shellMax = isCoord ? "max-w-3xl" : "max-w-md";
+  // Cel: angosto y cómodo; desktop: aprovecha el ancho
+  const shellMax = isCoord
+    ? "max-w-md md:max-w-3xl lg:max-w-5xl xl:max-w-6xl"
+    : "max-w-md md:max-w-3xl lg:max-w-5xl";
 
   return (
     <div className="min-h-screen bg-background">
@@ -75,6 +78,7 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <RefreshAppButton className="bg-white/10 border-white/15 text-white hover:bg-white/20" />
             <InstallAppButton
               variant="icon"
               className="bg-white/10 border border-white/15 text-white hover:bg-white/20"
@@ -93,15 +97,45 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
         <div className={cn("mx-auto mt-4 flex gap-1 bg-white/10 backdrop-blur-sm rounded-xl p-1", shellMax)}>
           {isCoord ? (
             <>
-              <TabBtn active={tab === "cumplimiento"} onClick={() => setTab("cumplimiento")} icon={<BarChart3 className="w-4 h-4" />} label="Sponsors" />
-              <TabBtn active={tab === "control"} onClick={() => setTab("control")} icon={<ClipboardCheck className="w-4 h-4" />} label="Control" />
-              <TabBtn active={tab === "pendientes"} onClick={() => setTab("pendientes")} icon={<MailWarning className="w-4 h-4" />} label="Pendientes" />
-              <TabBtn active={tab === "config"} onClick={() => setTab("config")} icon={<Settings className="w-4 h-4" />} label="Admin" />
+              <TabBtn
+                active={tab === "cumplimiento"}
+                onClick={() => setTab("cumplimiento")}
+                icon={<BarChart3 className="w-3.5 h-3.5" />}
+                label="Sponsors"
+              />
+              <TabBtn
+                active={tab === "calendario"}
+                onClick={() => setTab("calendario")}
+                icon={<CalendarClock className="w-3.5 h-3.5" />}
+                label="Calendario"
+              />
+              <TabBtn
+                active={tab === "pendientes"}
+                onClick={() => setTab("pendientes")}
+                icon={<MailWarning className="w-3.5 h-3.5" />}
+                label="Pendientes"
+              />
+              <TabBtn
+                active={tab === "config"}
+                onClick={() => setTab("config")}
+                icon={<Settings className="w-3.5 h-3.5" />}
+                label="Admin"
+              />
             </>
           ) : (
             <>
-              <TabBtn active={tab === "sponsors"} onClick={() => setTab("sponsors")} icon={<Building2 className="w-4 h-4" />} label="Sponsors" />
-              <TabBtn active={tab === "agenda"} onClick={() => setTab("agenda")} icon={<CalendarClock className="w-4 h-4" />} label="Agenda" />
+              <TabBtn
+                active={tab === "sponsors"}
+                onClick={() => setTab("sponsors")}
+                icon={<Building2 className="w-4 h-4" />}
+                label="Sponsors"
+              />
+              <TabBtn
+                active={tab === "agenda"}
+                onClick={() => setTab("agenda")}
+                icon={<CalendarClock className="w-4 h-4" />}
+                label="Agenda"
+              />
             </>
           )}
         </div>
@@ -109,8 +143,8 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
 
       <main className={cn("px-4 pt-5 mx-auto pb-10", shellMax)}>
         <Suspense fallback={<TabFallback />}>
-          {tab === "control" && isCoord && <ControlPanel />}
           {tab === "cumplimiento" && isCoord && <SponsorsBoard />}
+          {tab === "calendario" && isCoord && <CoordCalendar />}
           {tab === "pendientes" && isCoord && <PendingByResponsible />}
           {tab === "config" && isCoord && <AdminPanel />}
           {tab === "agenda" && !isCoord && (
@@ -139,10 +173,11 @@ const TabBtn = ({
   <button
     onClick={onClick}
     className={cn(
-      "flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg transition-all",
+      "flex-1 flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 text-[10px] sm:text-xs font-semibold py-2 rounded-lg transition-all",
       active ? "bg-primary text-primary-foreground shadow" : "text-white/80 hover:text-white"
     )}
   >
-    {icon} {label}
+    {icon}
+    <span>{label}</span>
   </button>
 );

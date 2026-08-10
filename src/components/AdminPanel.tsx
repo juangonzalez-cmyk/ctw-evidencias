@@ -6,8 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Plus, Trash2, Save, UserPlus } from "lucide-react";
+import { Plus, Trash2, Save, UserPlus, CalendarClock, Loader2 } from "lucide-react";
 import { EventCreateWizard } from "@/components/EventCreateWizard";
+import { PULPO_STAND_ENTREGAS } from "@/data/pulpoStandCronograma";
+import {
+  applyPulpoCronograma,
+  matchPulpoCronograma,
+  pulpoMatchKey,
+  type PulpoMatchRow,
+  type StandTaskRow,
+} from "@/lib/applyPulpoCronograma";
+import { formatEntregaBogota } from "@/lib/standRecepcion";
+import { StandHorariosAdmin } from "@/components/StandHorariosAdmin";
 
 type Question = Tables<"survey_questions">;
 
@@ -145,6 +155,9 @@ function EventsAdmin({
         <Plus className="w-4 h-4 mr-1" /> Nuevo evento (Notion)
       </Button>
 
+      {event && <PulpoCronogramaAdmin eventId={event.id} />}
+      {event && <StandHorariosAdmin eventId={event.id} />}
+
       <Button
         variant="outline"
         className="w-full text-destructive border-destructive/30"
@@ -153,6 +166,342 @@ function EventsAdmin({
       >
         <Trash2 className="w-4 h-4 mr-1" /> Reiniciar todo (empezar de cero)
       </Button>
+    </div>
+  );
+}
+
+function PulpoCronogramaAdmin({ eventId }: { eventId: string }) {
+  const { profiles } = useEvent();
+  const [busy, setBusy] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  /** Solo crea faltantes si además están marcados en la lista. */
+  const [createMissing, setCreateMissing] = useState(false);
+  const fieldProfiles = profiles.filter((p) => p.active !== false && !p.is_coordinator);
+  const [responsable, setResponsable] = useState(
+    () => fieldProfiles.find((p) => /daniela/i.test(p.name))?.name || fieldProfiles[0]?.name || ""
+  );
+  const [lastReport, setLastReport] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PulpoMatchRow[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!responsable && fieldProfiles[0]) setResponsable(fieldProfiles[0].name);
+  }, [fieldProfiles, responsable]);
+
+  const loadPreview = async () => {
+    setPreviewBusy(true);
+    try {
+      const { data, error } = await supabase
+        .from("tasks")
+        .select(
+          "id, marca, tipo_beneficio, category, flujo, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, deleted_at"
+        )
+        .eq("event_id", eventId)
+        .is("deleted_at", null);
+      if (error) throw error;
+      const rows = matchPulpoCronograma((data ?? []) as StandTaskRow[]);
+      setPreview(rows);
+      // Por defecto: solo matches existentes (nunca crear faltantes sin check explícito)
+      setSelected(
+        new Set(rows.filter((r) => r.status === "matched").map((r) => pulpoMatchKey(r.entrega)))
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo previsualizar el match");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId]);
+
+  // Si desactivan "crear faltantes", quitar checks de missing
+  useEffect(() => {
+    if (createMissing || !preview) return;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of preview) {
+        if (r.status === "missing") next.delete(pulpoMatchKey(r.entrega));
+      }
+      return next;
+    });
+  }, [createMissing, preview]);
+
+  const toggleRow = (row: PulpoMatchRow) => {
+    if (row.status === "ambiguous") return;
+    if (row.status === "missing" && !createMissing) {
+      toast.message("Activa “Crear stands que no existan” para marcar faltantes");
+      return;
+    }
+    const key = pulpoMatchKey(row.entrega);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectOnlyMatched = () => {
+    if (!preview) return;
+    setSelected(
+      new Set(
+        preview.filter((r) => r.status === "matched").map((r) => pulpoMatchKey(r.entrega))
+      )
+    );
+  };
+
+  const selectNone = () => setSelected(new Set());
+
+  const selectAllApplicable = () => {
+    if (!preview) return;
+    setSelected(
+      new Set(
+        preview
+          .filter((r) => r.status === "matched" || (createMissing && r.status === "missing"))
+          .map((r) => pulpoMatchKey(r.entrega))
+      )
+    );
+  };
+
+  const apply = async () => {
+    if (!responsable.trim()) {
+      toast.error("Elige un responsable por defecto para stands nuevos");
+      return;
+    }
+    if (selected.size === 0) {
+      toast.error("Marca al menos una fila del matching para aplicar");
+      return;
+    }
+    const selectedRows = (preview ?? []).filter((r) => selected.has(pulpoMatchKey(r.entrega)));
+    const matched = selectedRows.filter((r) => r.status === "matched").length;
+    const missing = selectedRows.filter((r) => r.status === "missing").length;
+    if (
+      !confirm(
+        `Se actualizarán ~${matched} stands existentes` +
+          (missing ? ` y se crearán ~${missing} faltantes` : "") +
+          `.\n(${selected.size} filas marcadas)\n¿Continuar?`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setLastReport(null);
+    try {
+      const result = await applyPulpoCronograma({
+        eventId,
+        createMissing: createMissing && missing > 0,
+        defaultResponsable: responsable.trim(),
+        selectedKeys: [...selected],
+      });
+      const lines = [
+        `Actualizados: ${result.updated}`,
+        `Creados: ${result.created}`,
+        `Omitidos: ${result.skipped}`,
+      ];
+      if (result.unmatched.length) {
+        lines.push(`Sin match: ${result.unmatched.join(", ")}`);
+      }
+      if (result.ambiguous.length) {
+        lines.push(`Ambiguos: ${result.ambiguous.join(" · ")}`);
+      }
+      setLastReport(lines.join("\n"));
+      toast.success(
+        `Cronograma aplicado · ${result.updated} actualizados` +
+          (result.created ? ` · ${result.created} creados` : "")
+      );
+      await loadPreview();
+    } catch (err) {
+      console.error(err);
+      toast.error((err as Error).message || "Error al aplicar cronograma");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const matchedN = preview?.filter((r) => r.status === "matched").length ?? 0;
+  const missingN = preview?.filter((r) => r.status === "missing").length ?? 0;
+  const ambiguousN = preview?.filter((r) => r.status === "ambiguous").length ?? 0;
+  const selectedMatched = preview
+    ? preview.filter((r) => r.status === "matched" && selected.has(pulpoMatchKey(r.entrega))).length
+    : 0;
+  const selectedMissing = preview
+    ? preview.filter((r) => r.status === "missing" && selected.has(pulpoMatchKey(r.entrega))).length
+    : 0;
+
+  return (
+    <div className="card-task space-y-3">
+      <div className="flex items-start gap-2">
+        <CalendarClock className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+        <div>
+          <div className="text-sm font-bold">Cronograma Pulpo → CTW</div>
+          <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+            Carga las {PULPO_STAND_ENTREGAS.length} entregas del Excel (11–12 ago). Marca solo las
+            filas que sí corresponden; lo no marcado no se toca ni se crea.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-muted/50 px-3 py-2 text-[11px] space-y-0.5">
+        {previewBusy && !preview ? (
+          <span className="text-muted-foreground">Calculando match…</span>
+        ) : (
+          <>
+            <div>
+              <strong className="text-foreground">{matchedN}</strong> listos ·{" "}
+              <strong className="text-foreground">{missingN}</strong> sin stand ·{" "}
+              <strong className="text-foreground">{ambiguousN}</strong> ambiguos
+            </div>
+            <div className="text-muted-foreground">
+              Seleccionados: {selectedMatched} actualizar
+              {createMissing ? ` · ${selectedMissing} crear` : ""}
+            </div>
+          </>
+        )}
+      </div>
+
+      {preview && (
+        <details className="text-[10px]" open>
+          <summary className="cursor-pointer font-semibold text-muted-foreground">
+            Matching marca por marca (con check)
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-0.5 text-[10px] font-medium hover:bg-muted"
+              onClick={selectOnlyMatched}
+            >
+              Solo matches
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-0.5 text-[10px] font-medium hover:bg-muted"
+              onClick={selectAllApplicable}
+            >
+              Todos aplicables
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-0.5 text-[10px] font-medium hover:bg-muted"
+              onClick={selectNone}
+            >
+              Ninguno
+            </button>
+          </div>
+          <ul className="mt-2 space-y-1 max-h-64 overflow-y-auto">
+            {preview.map((r) => {
+              const key = pulpoMatchKey(r.entrega);
+              const checked = selected.has(key);
+              const disabled = r.status === "ambiguous" || (r.status === "missing" && !createMissing);
+              return (
+                <li key={key}>
+                  <label
+                    className={`flex items-start gap-2 rounded-md px-1.5 py-1 ${
+                      disabled ? "opacity-55 cursor-not-allowed" : "cursor-pointer hover:bg-muted/60"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-3.5 w-3.5 accent-primary shrink-0"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => toggleRow(r)}
+                    />
+                    <span className="min-w-0 leading-snug">
+                      {r.status === "matched" && (
+                        <span className="text-success">
+                          ✓ {r.entrega.marca} → {r.task?.marca} (Pulpo {r.entrega.fecha.slice(5)}{" "}
+                          {r.entrega.hora}
+                          {r.task?.entrega_ctw_at
+                            ? ` · ahora ${formatEntregaBogota(r.task.entrega_ctw_at)}`
+                            : " · sin hora guardada"}
+                          )
+                        </span>
+                      )}
+                      {r.status === "missing" && (
+                        <span className="text-amber-700 dark:text-amber-400">
+                          ○ {r.entrega.marca}
+                          {r.brandHint
+                            ? ` (hay marca “${r.brandHint}”, sin stand)`
+                            : " (no está en el evento)"}
+                          {createMissing
+                            ? checked
+                              ? " — se creará"
+                              : " — no se creará"
+                            : " — creación desactivada"}
+                        </span>
+                      )}
+                      {r.status === "ambiguous" && (
+                        <span className="text-destructive">
+                          ? {r.entrega.marca} → {r.candidates.map((c) => c.marca).join(" | ")}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      )}
+
+      <label className="flex items-center gap-2 text-xs cursor-pointer">
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-primary"
+          checked={createMissing}
+          onChange={(e) => setCreateMissing(e.target.checked)}
+        />
+        Permitir crear stands que no existan (solo los marcados abajo)
+      </label>
+
+      <label className="block text-[10px] uppercase font-bold text-muted-foreground">
+        Responsable por defecto (stands nuevos)
+        <select
+          className="mt-1 w-full h-10 rounded-xl border border-border bg-background px-2 text-xs"
+          value={responsable}
+          onChange={(e) => setResponsable(e.target.value)}
+        >
+          <option value="">Elegir…</option>
+          {fieldProfiles.map((p) => (
+            <option key={p.id} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          className="flex-1"
+          onClick={() => void loadPreview()}
+          disabled={previewBusy || busy}
+        >
+          {previewBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Revisar match"}
+        </Button>
+        <Button className="flex-1" onClick={() => void apply()} disabled={busy || selected.size === 0}>
+          {busy ? (
+            <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+          ) : (
+            <CalendarClock className="w-4 h-4 mr-1" />
+          )}
+          Aplicar ({selected.size})
+        </Button>
+      </div>
+
+      {lastReport && (
+        <pre className="text-[10px] whitespace-pre-wrap rounded-lg bg-muted/60 p-2 text-muted-foreground">
+          {lastReport}
+        </pre>
+      )}
+
+      <p className="text-[10px] text-muted-foreground opacity-70">
+        Ej. hora Bogotá: {formatEntregaBogota("2026-08-11T13:30:00.000Z")}
+      </p>
     </div>
   );
 }

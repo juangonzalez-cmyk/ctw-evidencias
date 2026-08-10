@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   Video,
@@ -41,16 +41,18 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StandRecepcionModal } from "@/components/StandRecepcionModal";
 import {
-  STAND_DATETIME_STEP_SECONDS,
+  STAND_SPONSOR_MIN_AFTER_CTW_MINUTES,
   formatEntregaBogota,
   fromDatetimeLocalValue,
   hasActaRecepcion,
   hasPhotoEvidence,
+  isSponsorMinGapMet,
   isStandRecepcion,
   isStandRecepcionComplete,
-  snapDatetimeLocalToHalfHour,
+  minSponsorDatetimeLocal,
   toDatetimeLocalValue,
 } from "@/lib/standRecepcion";
+import { resolveEntregaCtwIso } from "@/lib/applyPulpoCronograma";
 import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 interface Props {
@@ -102,6 +104,20 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const [savingTimes, setSavingTimes] = useState(false);
 
   const stand = isStandRecepcion(task);
+  const effectiveCtwIso = useMemo(
+    () => (stand ? resolveEntregaCtwIso(task) : null),
+    [stand, task.marca, task.entrega_ctw_at]
+  );
+  const ctwFromPlan = !!(effectiveCtwIso && !task.entrega_ctw_at);
+  const sponsorMinLocal = useMemo(
+    () => minSponsorDatetimeLocal(effectiveCtwIso),
+    [effectiveCtwIso]
+  );
+  const sponsorMeetsMinGap = useMemo(() => {
+    if (!effectiveCtwIso || !sponsorLocal.trim()) return false;
+    const spIso = fromDatetimeLocalValue(sponsorLocal);
+    return isSponsorMinGapMet(effectiveCtwIso, spIso);
+  }, [effectiveCtwIso, sponsorLocal]);
   const url = task.evidencia_url || "";
   const isVideo = task.media_type === "video" || (!!url && isVideoUrl(url));
   const isDoc =
@@ -224,12 +240,32 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   };
 
   const handleSaveTimes = async () => {
+    if (!effectiveCtwIso || !sponsorLocal.trim() || !sponsorMeetsMinGap) {
+      toast.error("Horario no válido", {
+        description: `La entrega al sponsor debe ser al menos ${STAND_SPONSOR_MIN_AFTER_CTW_MINUTES} min después de Pulpo → CTW.`,
+      });
+      return;
+    }
     setSavingTimes(true);
     try {
-      const ctw = fromDatetimeLocalValue(ctwLocal);
+      // CTW: DB o cronograma Pulpo; al guardar se persiste junto con la entrega al sponsor.
+      const ctw = effectiveCtwIso;
       const sp = fromDatetimeLocalValue(sponsorLocal);
+      if (!ctw) {
+        throw new Error(
+          "No hay hora Pulpo → CTW para esta marca. Pide al admin cargar el cronograma."
+        );
+      }
+      if (!sp) {
+        throw new Error("Indica la hora de entrega al sponsor.");
+      }
+      if (!isSponsorMinGapMet(ctw, sp)) {
+        throw new Error(
+          `La entrega al sponsor debe ser al menos ${STAND_SPONSOR_MIN_AFTER_CTW_MINUTES} min después de Pulpo → CTW (${formatEntregaBogota(ctw)}).`
+        );
+      }
       await updateStandEntregas(task.id, ctw, sp);
-      toast.success("Horarios de entrega guardados");
+      toast.success("Hora de entrega al sponsor guardada");
       if (ctw && sp && hasPhotoEvidence(task) && hasActa) {
         setJustDone(true);
         setTimeout(() => setJustDone(false), 1200);
@@ -421,7 +457,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           </p>
           <StandCheck ok={hasEvidence} label="Foto del stand" />
           <StandCheck ok={hasActa} label="Acta firmada por el sponsor" />
-          <StandCheck ok={!!task.entrega_ctw_at} label="Hora de entrega a Colombia Tech" />
+          <StandCheck ok={!!effectiveCtwIso} label="Pulpo → Colombia Tech (cronograma)" />
           <StandCheck ok={!!task.entrega_sponsor_at} label="Hora de entrega al sponsor" />
           {standComplete && (
             <p className="text-[11px] font-semibold text-success pt-1">
@@ -535,51 +571,88 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
             Horarios de entrega
           </p>
-          <p className="text-[10px] text-muted-foreground">
-            Solo cada 30 minutos. Dos stands no pueden compartir la misma hora (CTW o sponsor).
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            Pulpo → CTW viene del cronograma. Puedes programar la entrega al sponsor solo a partir de{" "}
+            {STAND_SPONSOR_MIN_AFTER_CTW_MINUTES} min después, y sin cruzarte con otra entrega a
+            sponsor.
           </p>
+          <div className="rounded-lg bg-muted/50 px-3 py-2">
+            <div className="text-[10px] uppercase font-bold text-muted-foreground">
+              Pulpo → Colombia Tech
+            </div>
+            <div className="text-sm font-semibold mt-0.5">
+              {effectiveCtwIso ? formatEntregaBogota(effectiveCtwIso) : "Sin horario en cronograma"}
+            </div>
+            {ctwFromPlan && (
+              <div className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5 font-medium">
+                Del Excel Pulpo · se guarda al programar la entrega al sponsor
+              </div>
+            )}
+          </div>
           <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">Entrega a Colombia Tech</span>
-            <input
-              type="datetime-local"
-              data-stand-field="ctw"
-              step={STAND_DATETIME_STEP_SECONDS}
-              value={ctwLocal}
-              onChange={(e) => setCtwLocal(snapDatetimeLocalToHalfHour(e.target.value))}
-              className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
-            />
-          </label>
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">Entrega al sponsor</span>
+            <span className="text-xs text-muted-foreground">
+              Entrega al sponsor / proveedor
+              {sponsorMinLocal ? (
+                <span className="block text-[10px] mt-0.5">
+                  Mínimo: {formatEntregaBogota(
+                    effectiveCtwIso
+                      ? new Date(
+                          new Date(effectiveCtwIso).getTime() +
+                            STAND_SPONSOR_MIN_AFTER_CTW_MINUTES * 60_000
+                        ).toISOString()
+                      : null
+                  )}
+                </span>
+              ) : null}
+            </span>
             <input
               type="datetime-local"
               data-stand-field="sponsor"
-              step={STAND_DATETIME_STEP_SECONDS}
+              step={60}
+              min={sponsorMinLocal || undefined}
               value={sponsorLocal}
-              onChange={(e) => setSponsorLocal(snapDatetimeLocalToHalfHour(e.target.value))}
-              className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm"
+              onChange={(e) => {
+                // No auto-corregir: si está bajo el mínimo, el botón queda bloqueado.
+                setSponsorLocal(e.target.value);
+              }}
+              disabled={!effectiveCtwIso || busy}
+              className="w-full h-11 rounded-xl border border-input bg-background px-3 text-sm disabled:opacity-50"
             />
           </label>
           <button
             type="button"
             onClick={() => void handleSaveTimes()}
-            disabled={busy}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-border bg-card hover:bg-muted disabled:opacity-50"
+            disabled={busy || !effectiveCtwIso || !sponsorLocal || !sponsorMeetsMinGap || savingTimes}
+            aria-disabled={busy || !effectiveCtwIso || !sponsorLocal || !sponsorMeetsMinGap || savingTimes}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-border bg-card hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
           >
-            {savingTimes ? "Guardando…" : "Guardar horarios"}
+            {savingTimes ? "Guardando…" : "Guardar entrega al sponsor"}
           </button>
-          {(task.entrega_ctw_at || task.entrega_sponsor_at) && (
+          {sponsorLocal && effectiveCtwIso && !sponsorMeetsMinGap && (
+            <p className="text-[10px] text-destructive leading-snug">
+              Debe ser al menos {STAND_SPONSOR_MIN_AFTER_CTW_MINUTES} min después de Pulpo → CTW
+              {sponsorMinLocal ? ` (mínimo ${sponsorMinLocal.replace("T", " ")})` : ""}. El botón
+              queda bloqueado hasta corregir la hora.
+            </p>
+          )}
+          {(effectiveCtwIso || task.entrega_sponsor_at) && (
             <p className="text-[10px] text-muted-foreground">
-              CTW: {formatEntregaBogota(task.entrega_ctw_at)} · Sponsor:{" "}
+              CTW: {formatEntregaBogota(effectiveCtwIso)} · Sponsor:{" "}
               {formatEntregaBogota(task.entrega_sponsor_at)}
+            </p>
+          )}
+          {!effectiveCtwIso && (
+            <p className="text-[10px] text-destructive leading-snug">
+              Esta marca no tiene match en el cronograma Pulpo. El admin debe cargarlo o asignar la
+              hora Pulpo → CTW.
             </p>
           )}
         </div>
       )}
 
-      {stand && !canEditEvidence && (task.entrega_ctw_at || task.entrega_sponsor_at) && (
+      {stand && !canEditEvidence && (effectiveCtwIso || task.entrega_sponsor_at) && (
         <p className="text-[11px] text-muted-foreground mb-2">
-          CTW: {formatEntregaBogota(task.entrega_ctw_at)} · Sponsor:{" "}
+          CTW: {formatEntregaBogota(effectiveCtwIso)} · Sponsor:{" "}
           {formatEntregaBogota(task.entrega_sponsor_at)}
         </p>
       )}

@@ -34,3 +34,6 @@ oauth.json
 .notion/
 
 .env*
+
+# Local DB/merge backups
+backups/

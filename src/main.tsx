@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import { setPwaUpdateHandler } from "./lib/appRefresh";
 
 createRoot(document.getElementById("root")!).render(<App />);
 
@@ -9,13 +10,18 @@ if (typeof window !== "undefined") {
   const schedule =
     "requestIdleCallback" in window
       ? (cb: () => void) =>
-          (window as Window & { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback(cb, {
+          (
+            window as Window & {
+              requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+            }
+          ).requestIdleCallback(cb, {
             timeout: 2500,
           })
       : (cb: () => void) => window.setTimeout(cb, 1200);
   schedule(() => {
     void import("virtual:pwa-register").then(({ registerSW }) => {
-      registerSW({ immediate: true });
+      const updateSW = registerSW({ immediate: true });
+      setPwaUpdateHandler(updateSW);
     });
   });
 }
