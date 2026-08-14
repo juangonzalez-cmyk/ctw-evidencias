@@ -43,6 +43,7 @@ import {
 } from "@/lib/standRecepcion";
 import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 import { downloadAllEvidencias, type DownloadProgress } from "@/lib/downloadEvidencias";
+import { safeHttpUrl } from "@/lib/upload";
 
 const VIEW_KEY = "ctw-coord-sponsors-view";
 type ViewMode = "lista" | "tarjetas";
@@ -71,7 +72,9 @@ export function SponsorsBoard() {
   const [estado, setEstado] = useState<"all" | "pendiente" | "con_evidencia" | "aprobada">("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOwner, setBulkOwner] = useState("");
-  const [busy, setBusy] = useState(false);
+  /** null = idle; "*" = bulk; id = esa fila */
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const busy = busyId !== null;
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [sponsorOpen, setSponsorOpen] = useState<Record<string, boolean>>({});
   const [addOpen, setAddOpen] = useState(false);
@@ -178,7 +181,7 @@ export function SponsorsBoard() {
       toast.error("No hay evidencia para aprobar");
       return;
     }
-    setBusy(true);
+    setBusyId(task.id);
     const { error } = await supabase
       .from("tasks")
       .update({
@@ -188,7 +191,7 @@ export function SponsorsBoard() {
         edited_at: new Date().toISOString(),
       })
       .eq("id", task.id);
-    setBusy(false);
+    setBusyId(null);
     if (error) {
       toast.error("No se pudo aprobar", { description: error.message });
       return;
@@ -299,13 +302,13 @@ export function SponsorsBoard() {
       toast.error("Elige responsable y al menos un beneficio");
       return;
     }
-    setBusy(true);
+    setBusyId("*");
     const ids = Array.from(selected);
     const { error } = await supabase
       .from("tasks")
       .update({ responsable: bulkOwner.trim(), edited_at: new Date().toISOString() })
       .in("id", ids);
-    setBusy(false);
+    setBusyId(null);
     if (error) {
       toast.error(error.message);
       return;
@@ -316,7 +319,7 @@ export function SponsorsBoard() {
   };
 
   const saveRow = async (task: Task, patch: Partial<Task>) => {
-    setBusy(true);
+    setBusyId(task.id);
     let finalPatch: Partial<Task> = { ...patch, edited_at: new Date().toISOString() };
 
     if (patch.flujo !== undefined) {
@@ -353,7 +356,7 @@ export function SponsorsBoard() {
     }
 
     const { error } = await supabase.from("tasks").update(finalPatch).eq("id", task.id);
-    setBusy(false);
+    setBusyId(null);
     if (error) toast.error(error.message);
     else {
       toast.success("Guardado");
@@ -363,12 +366,12 @@ export function SponsorsBoard() {
 
   const softDeleteTasks = async (ids: string[]) => {
     if (ids.length === 0) return;
-    setBusy(true);
+    setBusyId(ids.length === 1 ? ids[0]! : "*");
     const { error } = await supabase
       .from("tasks")
       .update({ deleted_at: new Date().toISOString() })
       .in("id", ids);
-    setBusy(false);
+    setBusyId(null);
     if (error) {
       toast.error(error.message || "No se pudo eliminar");
       return;
@@ -538,7 +541,7 @@ export function SponsorsBoard() {
                     <InlineEditor
                       task={t}
                       owners={owners}
-                      busy={busy}
+                      busy={busyId === t.id || busyId === "*"}
                       onSave={saveRow}
                       onApprove={approveTask}
                       onDelete={() => setDeleteConfirm(t)}
@@ -912,9 +915,9 @@ function InlineEditor({
           />
         </label>
       </div>
-      {task.evidencia_url && (
+      {safeHttpUrl(task.evidencia_url) && (
         <a
-          href={task.evidencia_url}
+          href={safeHttpUrl(task.evidencia_url)!}
           target="_blank"
           rel="noreferrer"
           className="text-[11px] font-semibold text-primary underline block"
@@ -922,9 +925,9 @@ function InlineEditor({
           Ver {isStandRecepcion(task) ? "foto del stand" : "evidencia"}
         </a>
       )}
-      {task.acta_recepcion_url && (
+      {safeHttpUrl(task.acta_recepcion_url) && (
         <a
-          href={task.acta_recepcion_url}
+          href={safeHttpUrl(task.acta_recepcion_url)!}
           target="_blank"
           rel="noreferrer"
           className="text-[11px] font-semibold text-primary underline block"

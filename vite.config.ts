@@ -119,14 +119,17 @@ export default defineConfig(({ mode }) => ({
           "**/index.es-*.js",
         ],
         runtimeCaching: [
+          // Nunca cachear la API de Supabase: si no, tras subir evidencia el GET puede
+          // devolver datos viejos y los botones parecen “no guardar”.
           {
-            urlPattern: ({ url }) => url.hostname.includes("supabase.co"),
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "supabase-api",
-              networkTimeoutSeconds: 3,
-              expiration: { maxEntries: 48, maxAgeSeconds: 60 * 30 },
-            },
+            urlPattern: ({ url }) =>
+              url.hostname.includes("supabase.co") &&
+              (url.pathname.includes("/rest/v1/") ||
+                url.pathname.includes("/storage/v1/") ||
+                url.pathname.includes("/auth/v1/") ||
+                url.pathname.includes("/realtime/")),
+            handler: "NetworkOnly",
+            options: { cacheName: "supabase-api-bypass" },
           },
         ],
       },

@@ -138,6 +138,19 @@ export function normalizeEvidenceLink(raw: string): string {
   return parsed.toString();
 }
 
+/** Solo http(s) seguro para href en UI (evita javascript: u otros esquemas). */
+export function safeHttpUrl(url: string | null | undefined): string | null {
+  const u = (url || "").trim();
+  if (!u) return null;
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function linkDisplayHost(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -281,8 +294,11 @@ export async function uploadEvidencia(
   }
 
   const current = await fetchTaskStandFields(taskId);
+  if (!current) {
+    throw new Error("No se pudo leer el beneficio. Refresca la app e intenta de nuevo.");
+  }
   const isStand = taskIsStandFlow(current);
-  const existing = listEvidencias(current || {});
+  const existing = listEvidencias(current);
 
   // Stands: una sola foto principal (reemplaza archivo previo, conserva links si hubiera)
   if (isStand) {
@@ -346,11 +362,14 @@ export async function saveEvidenciaLink(
 ) {
   const url = normalizeEvidenceLink(rawUrl);
   const current = await fetchTaskStandFields(taskId);
+  if (!current) {
+    throw new Error("No se pudo leer el beneficio. Refresca la app e intenta de nuevo.");
+  }
   if (taskIsStandFlow(current)) {
     throw new Error("En stands la evidencia principal debe ser una foto, no un link.");
   }
 
-  const existing = listEvidencias(current || {});
+  const existing = listEvidencias(current);
   if (existing.some((e) => e.url === url)) {
     throw new Error("Ese link ya está guardado en este beneficio");
   }
@@ -377,7 +396,10 @@ export async function saveEvidenciaLink(
 /** Elimina un soporte concreto (archivo o link) sin borrar los demás. */
 export async function removeEvidenciaItem(taskId: string, itemId: string) {
   const current = await fetchTaskStandFields(taskId);
-  const existing = listEvidencias(current || {});
+  if (!current) {
+    throw new Error("No se pudo leer el beneficio. Refresca la app e intenta de nuevo.");
+  }
+  const existing = listEvidencias(current);
   const target = existing.find((e) => e.id === itemId);
   if (!target) throw new Error("Soporte no encontrado");
 
@@ -412,29 +434,23 @@ export async function removeEvidenciaItem(taskId: string, itemId: string) {
     return;
   }
 
-  await persistEvidencias(taskId, next, current?.subido_por || "sistema", {
+  await persistEvidencias(taskId, next, current.subido_por || "sistema", {
     status: primary.evidencia_url ? "por_validar" : "pendiente",
     rejected_at: null,
     approved_at: null,
   });
 }
 
-export async function removeEvidencia(taskId: string, currentUrl: string | null | undefined) {
+/** Borra TODOS los soportes del beneficio. */
+export async function removeEvidencia(taskId: string, _currentUrl?: string | null) {
   const current = await fetchTaskStandFields(taskId);
-  const existing = listEvidencias(current || {});
-
-  // Si hay lista multi, borrar el ítem que coincide con la URL (o el primario)
-  if (existing.length > 1 && currentUrl) {
-    const hit = existing.find((e) => e.url === currentUrl) || existing[0];
-    await removeEvidenciaItem(taskId, hit.id);
-    return;
+  if (!current) {
+    throw new Error("No se pudo leer el beneficio. Refresca la app e intenta de nuevo.");
   }
+  const existing = listEvidencias(current);
 
   for (const item of existing) {
     if (isSupabaseEvidencia(item.url)) await deleteStorageObject(item.url);
-  }
-  if (currentUrl && isSupabaseEvidencia(currentUrl) && !existing.some((e) => e.url === currentUrl)) {
-    await deleteStorageObject(currentUrl);
   }
 
   const isStand = taskIsStandFlow(current);

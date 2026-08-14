@@ -34,6 +34,7 @@ import {
   isLinkEvidence,
   linkDisplayHost,
   fileExt,
+  safeHttpUrl,
   EVIDENCIA_ACCEPT,
 } from "@/lib/upload";
 import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
@@ -142,6 +143,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const mencion = isMencionMC(task);
   const mencionComplete = mencion && hasEvidence && (task.captured_brands?.length ?? 0) > 0;
   const preferVideoCapture = !stand && task.media_type === "video";
+  /** Stands: solo foto. Beneficios normales: foto o video desde galería/cámara. */
+  const cameraAccept = stand ? "image/*" : preferVideoCapture ? "video/*" : "image/*,video/*";
+  const galleryAccept = stand ? "image/*" : "image/*,video/*";
   const standComplete = stand && isStandRecepcionComplete(task);
 
   useEffect(() => {
@@ -376,7 +380,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       <input
         ref={cameraRef}
         type="file"
-        accept={preferVideoCapture ? "video/*" : "image/*"}
+        accept={cameraAccept}
         capture="environment"
         onChange={handleFile}
         className="hidden"
@@ -384,7 +388,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
       <input
         ref={galleryRef}
         type="file"
-        accept={preferVideoCapture ? "video/*" : "image/*"}
+        accept={galleryAccept}
         onChange={handleFile}
         className="hidden"
       />
@@ -525,9 +529,9 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
                     className="w-full max-h-48 object-cover"
                     loading="lazy"
                   />
-                ) : (
+                ) : safeHttpUrl(item.url) ? (
                   <a
-                    href={item.url}
+                    href={safeHttpUrl(item.url)!}
                     target="_blank"
                     rel="noreferrer"
                     className="flex items-center gap-3 px-4 py-4 text-sm font-medium text-primary hover:bg-muted/50"
@@ -563,6 +567,11 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
                     </span>
                     <ExternalLink className="w-4 h-4 shrink-0 ml-auto" />
                   </a>
+                ) : (
+                  <div className="flex items-center gap-3 px-4 py-4 text-sm text-muted-foreground">
+                    <FileText className="w-5 h-5 shrink-0" />
+                    <span className="truncate">URL no válida para abrir</span>
+                  </div>
                 )}
                 <div className="flex items-center gap-1.5 px-3 py-2 text-[11px] border-t border-border bg-card">
                   <span className="rounded-md bg-muted px-1.5 py-0.5 font-semibold text-muted-foreground">
@@ -613,10 +622,13 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
               Firmó: {task.firma_nombre || "—"}
             </span>
             <a
-              href={task.acta_recepcion_url}
+              href={safeHttpUrl(task.acta_recepcion_url) || "#"}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-primary font-semibold"
+              onClick={(e) => {
+                if (!safeHttpUrl(task.acta_recepcion_url)) e.preventDefault();
+              }}
             >
               <ExternalLink className="w-3 h-3" /> Abrir
             </a>
@@ -988,9 +1000,11 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
           </p>
         )}
 
-        {!stand && !hasEvidence && !canEditEvidence && (
+        {!stand && !hasEvidence && !canEditEvidence && safeHttpUrl(task.evidencia_url) && (
           <a
-            href={task.evidencia_url || "#"}
+            href={safeHttpUrl(task.evidencia_url)!}
+            target="_blank"
+            rel="noreferrer"
             className="flex items-center gap-1.5 text-xs text-primary font-medium px-3 py-2 bg-primary/10 rounded-lg"
           >
             <ImageIcon className="w-3.5 h-3.5" /> Ver evidencia
