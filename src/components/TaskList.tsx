@@ -38,7 +38,7 @@ type KamScope = "portfolio" | "mine";
 type EvidenceFilter = "all" | "pending" | "done";
 
 const VIEW_KEY = "ctw-field-sponsors-view";
-const SCOPE_KEY = "ctw-kam-scope";
+const SCOPE_KEY = "ctw-kam-scope-v2";
 const EVID_KEY = "ctw-kam-evidence-filter";
 
 function loadViewMode(): ViewMode {
@@ -58,7 +58,7 @@ function loadKamScope(): KamScope {
   } catch {
     /* ignore */
   }
-  return "mine";
+  return "portfolio";
 }
 
 function loadEvidenceFilter(): EvidenceFilter {
@@ -185,6 +185,13 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
 
   const completed = useMemo(() => scopedTasks.filter((t) => taskHasSupport(t)).length, [scopedTasks]);
   const pendingCount = scopedTasks.length - completed;
+  const othersInPortfolio = useMemo(
+    () =>
+      kamView
+        ? portfolioTasks.filter((t) => t.responsable !== responsable).length
+        : 0,
+    [kamView, portfolioTasks, responsable]
+  );
 
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -395,6 +402,11 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
             <div className="text-[10px] text-muted-foreground mt-0.5">
               {done}/{items.length} listos
               {pending > 0 ? ` · ${pending} pendientes` : ""}
+              {kamView &&
+              kamScope === "mine" &&
+              (fullBySponsor.get(sponsor)?.length ?? items.length) > items.length
+                ? ` · ${fullBySponsor.get(sponsor)!.length - items.length} de otros en Portafolio`
+                : ""}
             </div>
           </div>
           <span
@@ -474,7 +486,11 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
             <div className="text-xs text-muted-foreground mt-0.5">
               {completed}/{scopedTasks.length} con soporte · {pendingCount} pendiente
               {pendingCount === 1 ? "" : "s"}
-              {kamView && kamScope === "portfolio" ? " · incluye otros roles" : ""}
+              {kamView && othersInPortfolio > 0
+                ? kamScope === "mine"
+                  ? ` · ${othersInPortfolio} de otros roles (ver Portafolio)`
+                  : " · incluye otros roles"
+                : ""}
             </div>
           </div>
           <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
@@ -517,14 +533,14 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
         {kamView && (
           <div className="space-y-2">
             <div className="flex flex-wrap gap-1.5">
-              <FilterChip active={kamScope === "mine"} onClick={() => setKamScope("mine")}>
-                Solo míos
-              </FilterChip>
               <FilterChip
                 active={kamScope === "portfolio"}
                 onClick={() => setKamScope("portfolio")}
               >
                 Portafolio
+              </FilterChip>
+              <FilterChip active={kamScope === "mine"} onClick={() => setKamScope("mine")}>
+                Solo míos
               </FilterChip>
             </div>
             <div className="flex flex-wrap gap-1.5">

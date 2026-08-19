@@ -12,7 +12,7 @@ export const BRAND_GROUPS: Record<string, string[]> = {
   "Service Lab": ["Equinix", "HPE", "AMD", "ServiceIA", "ServiceLab", "Engineering System"],
   "Semana - Dinero": ["Semana", "Dinero"],
   "Make - Celonis": ["Make", "Make-Celonis"],
-  "U. Rosario": ["Universidad del Rosario", "Universidad el Rosario"],
+  "Due Legal": ["Due Legal", "DUE LEGAL", "Duelegal", "Due Legal SAS"],
 };
 
 const BRAND_LOOKUP: Record<string, string> = (() => {

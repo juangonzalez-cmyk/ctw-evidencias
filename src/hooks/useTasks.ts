@@ -27,7 +27,7 @@ export function useTasks(responsable: string | null) {
     const { data, error } = await fetchAllPages<Task>((from, to) =>
       supabase
         .from("tasks")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("event_id", event.id)
         .eq("responsable", responsable)
         .is("deleted_at", null)
@@ -35,7 +35,7 @@ export function useTasks(responsable: string | null) {
         .range(from, to)
     );
     if (error) console.error(error);
-    else setTasks(data);
+    setTasks(data);
     setLoading(false);
   }, [responsable, event]);
 
@@ -75,14 +75,15 @@ export function useAllTasks() {
       supabase
         .from("tasks")
         .select(
-          "id,event_id,marca,tipo_beneficio,responsable,dia,hora,fase,status,evidencia_url,evidencias,media_type,deleted_at,approved_at,rejected_at,edited_at,is_timed,speaker,stage,notas,created_at,updated_at,flujo,acta_recepcion_url,firma_nombre,entrega_ctw_at,entrega_sponsor_at,tipo_entrega,category"
+          "id,event_id,marca,tipo_beneficio,responsable,dia,hora,fase,status,evidencia_url,evidencias,media_type,deleted_at,approved_at,rejected_at,edited_at,is_timed,speaker,stage,notas,created_at,updated_at,flujo,acta_recepcion_url,firma_nombre,entrega_ctw_at,entrega_sponsor_at,tipo_entrega,category,hora_subida,subido_por",
+          { count: "exact" }
         )
         .eq("event_id", event.id)
         .order("id", { ascending: true })
         .range(from, to)
     );
     if (error) console.error(error);
-    else setTasks(data);
+    setTasks(data);
     setLoading(false);
   }, [event]);
 
