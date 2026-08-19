@@ -44,6 +44,7 @@ import {
 import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 import { downloadAllEvidencias, type DownloadProgress } from "@/lib/downloadEvidencias";
 import { safeHttpUrl } from "@/lib/upload";
+import { staffInformePath } from "@/lib/sponsorReports";
 
 const VIEW_KEY = "ctw-coord-sponsors-view";
 type ViewMode = "lista" | "tarjetas";
@@ -167,7 +168,7 @@ export function SponsorsBoard() {
       return;
     }
     // Misma ventana/PWA: evita perder el contexto de la app (sin barra del navegador).
-    window.location.assign(`/informe/${token}`);
+    window.location.assign(staffInformePath(token));
   };
 
   const approveTask = async (task: Task) => {

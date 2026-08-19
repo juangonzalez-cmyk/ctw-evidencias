@@ -13,6 +13,7 @@ import {
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isKamName } from "@/lib/kam";
 
 const TaskList = lazy(() =>
   import("./TaskList").then((m) => ({ default: m.TaskList }))
@@ -151,7 +152,11 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
             <Agenda responsable={profile.name} uploaderName={profile.name} />
           )}
           {tab === "sponsors" && !isCoord && (
-            <TaskList responsable={profile.name} uploaderName={profile.name} />
+            <TaskList
+              responsable={profile.name}
+              uploaderName={profile.name}
+              kamView={isKamName(profile.name)}
+            />
           )}
         </Suspense>
       </main>

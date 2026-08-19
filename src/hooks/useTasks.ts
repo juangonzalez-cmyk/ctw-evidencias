@@ -23,7 +23,6 @@ export function useTasks(responsable: string | null) {
       setLoading(false);
       return;
     }
-    setLoading(true);
     const { data, error } = await supabase
       .from("tasks")
       .select("*")

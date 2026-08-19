@@ -85,7 +85,7 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
     (t) =>
       !t.deleted_at &&
       t.status !== "rechazado" &&
-      (t.evidencia_url || (isStandRecepcion(t) && t.acta_recepcion_url))
+      (listEvidencias(t).length > 0 || (isStandRecepcion(t) && t.acta_recepcion_url))
   );
 
   // Portada

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useTasks, STATUS, type Task } from "@/hooks/useTasks";
+import { useAllTasks, STATUS, type Task } from "@/hooks/useTasks";
 import { TaskCard } from "./TaskCard";
 import { unifyBrand } from "@/lib/brands";
 import { Input } from "@/components/ui/input";
@@ -7,17 +7,30 @@ import { Button } from "@/components/ui/button";
 import {
   ChevronDown,
   ChevronRight,
+  FileDown,
   LayoutGrid,
   LayoutList,
+  Link2,
+  Loader2,
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { displayBeneficioLabel } from "@/lib/beneficioLabel";
+import { useEvent } from "@/context/EventContext";
+import { toast } from "sonner";
+import {
+  downloadSponsorPdfBlob,
+  ensureSponsorReportTokens,
+  publicInformeUrl,
+  staffInformePath,
+} from "@/lib/sponsorReports";
+import { hasRequiredEvidence } from "@/lib/standRecepcion";
 
 interface Props {
   responsable: string;
   uploaderName: string;
   relevoOf?: string;
+  kamView?: boolean;
 }
 
 type ViewMode = "lista" | "tarjetas";
@@ -51,12 +64,30 @@ function statusChip(t: Task) {
   return { label: "Pendiente", cls: "bg-muted text-muted-foreground" };
 }
 
-export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
-  const { tasks, loading } = useTasks(responsable);
+export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false }: Props) => {
+  const { event } = useEvent();
+  const { tasks: allTasks, loading } = useAllTasks();
   const [search, setSearch] = useState("");
   const [openSponsors, setOpenSponsors] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
+  const [reportTokens, setReportTokens] = useState<Record<string, string>>({});
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+
+  const active = useMemo(() => allTasks.filter((t) => !t.deleted_at), [allTasks]);
+
+  const portfolioBrands = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of active) {
+      if (t.responsable === responsable) set.add(unifyBrand(t.marca));
+    }
+    return set;
+  }, [active, responsable]);
+
+  const tasks = useMemo(() => {
+    if (!kamView) return active.filter((t) => t.responsable === responsable);
+    return active.filter((t) => portfolioBrands.has(unifyBrand(t.marca)));
+  }, [active, kamView, responsable, portfolioBrands]);
 
   useEffect(() => {
     try {
@@ -67,10 +98,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
   }, [viewMode]);
 
   const completed = useMemo(
-    () =>
-      tasks.filter(
-        (t) => t.status === STATUS.REVIEW || t.status === STATUS.APPROVED
-      ).length,
+    () => tasks.filter((t) => hasRequiredEvidence({ ...t, rejected_at: null })).length,
     [tasks]
   );
 
@@ -124,6 +152,68 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
     setExpandedId(null);
   };
 
+  const kamSponsorNames = useMemo(
+    () => Array.from(portfolioBrands).sort((a, b) => a.localeCompare(b, "es")),
+    [portfolioBrands]
+  );
+
+  useEffect(() => {
+    if (!kamView || !event || kamSponsorNames.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const map = await ensureSponsorReportTokens(event.id, kamSponsorNames);
+        if (!cancelled) setReportTokens(map);
+      } catch (e) {
+        console.error("ensure_sponsor_reports failed", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kamView, event, kamSponsorNames]);
+
+  const copyReportLink = async (sponsor: string) => {
+    const token = reportTokens[sponsor];
+    if (!token) {
+      toast.error("Aún no hay link — recarga en unos segundos");
+      return;
+    }
+    const url = publicInformeUrl(token);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link del informe (para el sponsor) copiado");
+    } catch {
+      window.prompt("Copia este link del informe:", url);
+    }
+  };
+
+  const openReport = (sponsor: string) => {
+    const token = reportTokens[sponsor];
+    if (!token) {
+      toast.error("Aún no hay link — recarga en unos segundos");
+      return;
+    }
+    window.location.assign(staffInformePath(token));
+  };
+
+  const downloadReport = async (sponsor: string, items: Task[]) => {
+    setPdfBusy(sponsor);
+    try {
+      await downloadSponsorPdfBlob({
+        sponsorName: sponsor,
+        eventName: event?.short_name || event?.name || "CTW",
+        tasks: items,
+      });
+      toast.success("Informe generado");
+    } catch (e) {
+      console.error(e);
+      toast.error("No se pudo generar el PDF");
+    } finally {
+      setPdfBusy(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6 text-center text-muted-foreground text-sm">
@@ -143,6 +233,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
   const renderBenefitRow = (t: Task) => {
     const rowOpen = expandedId === t.id;
     const chip = statusChip(t);
+    const mine = t.responsable === responsable;
     return (
       <li key={t.id} className="border-t border-border/70">
         <button
@@ -154,11 +245,11 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
             <div className="text-xs font-semibold leading-snug line-clamp-2">
               {displayBeneficioLabel(t.tipo_beneficio)}
             </div>
-            {t.is_timed && t.hora && (
-              <div className="text-[10px] text-muted-foreground mt-0.5">
-                {t.dia} · {t.hora}
-              </div>
-            )}
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              {t.is_timed && t.hora ? `${t.dia} · ${t.hora}` : null}
+              {kamView && t.responsable ? `${t.is_timed && t.hora ? " · " : ""}Captura: ${t.responsable}` : null}
+              {kamView && !mine ? " · solo lectura" : null}
+            </div>
           </div>
           <span
             className={cn(
@@ -176,7 +267,12 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
         </button>
         {rowOpen && (
           <div className="px-3 pb-3">
-            <TaskCard task={t} uploaderName={uploaderName} relevoOf={relevoOf} />
+            <TaskCard
+              task={t}
+              uploaderName={uploaderName}
+              relevoOf={relevoOf}
+              readOnly={kamView && !mine}
+            />
           </div>
         )}
       </li>
@@ -185,9 +281,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
 
   const renderSponsorGroup = (sponsor: string, items: Task[], asCard: boolean) => {
     const open = isOpen(sponsor);
-    const done = items.filter(
-      (t) => t.status === STATUS.REVIEW || t.status === STATUS.APPROVED
-    ).length;
+    const done = items.filter((t) => hasRequiredEvidence({ ...t, rejected_at: null })).length;
     const pending = items.length - done;
 
     return (
@@ -226,6 +320,42 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
             {pending === 0 ? "OK" : `${pending}`}
           </span>
         </button>
+        {kamView && (
+          <div className="flex items-center gap-1 px-3 pb-2 bg-muted/40">
+            <button
+              type="button"
+              onClick={() => void copyReportLink(sponsor)}
+              className="p-1.5 rounded-lg hover:bg-background text-muted-foreground"
+              title="Copiar link para el sponsor"
+              aria-label={`Copiar link informe ${sponsor}`}
+            >
+              <Link2 className="w-4 h-4" />
+            </button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] px-2"
+              onClick={() => openReport(sponsor)}
+            >
+              Ver informe
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 text-[10px] px-2"
+              disabled={pdfBusy === sponsor || done === 0}
+              onClick={() => void downloadReport(sponsor, items)}
+            >
+              {pdfBusy === sponsor ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileDown className="w-3.5 h-3.5 mr-1" />
+              )}
+              Generar PDF
+            </Button>
+          </div>
+        )}
 
         {open && (
           <ul className="divide-y-0">{items.map((t) => renderBenefitRow(t))}</ul>
@@ -240,7 +370,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
-              Mis sponsors
+              {kamView ? "Portafolio KAM" : "Mis sponsors"}
             </div>
             <div className="text-lg font-bold mt-0.5">
               {grouped.length} sponsor{grouped.length === 1 ? "" : "s"} · {tasks.length}{" "}
@@ -248,6 +378,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf }: Props) => {
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">
               {completed}/{tasks.length} con soporte cargado
+              {kamView ? " · incluye beneficios de otros roles" : ""}
             </div>
           </div>
           <div className="flex rounded-lg border border-border overflow-hidden shrink-0">

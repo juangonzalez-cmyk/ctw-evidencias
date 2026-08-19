@@ -62,6 +62,8 @@ interface Props {
   task: Task;
   uploaderName: string;
   relevoOf?: string;
+  /** Si true, se ve la evidencia pero no se puede subir/quitar. */
+  readOnly?: boolean;
 }
 
 const isLate = (task: Task): boolean => {
@@ -85,7 +87,7 @@ const STATUS_META: Record<string, { label: string; cls: string; icon: string }> 
 
 const isMencionMC = (task: Task) => !!(task.brands && task.brands.length > 0);
 
-export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
+export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Props) => {
   const { event } = useEvent();
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -136,6 +138,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf }: Props) => {
   const hasActa = hasActaRecepcion(task);
   const storedDoc = isSupabaseEvidencia(url);
   const canEditEvidence =
+    !readOnly &&
     !approved &&
     (task.status === STATUS.PENDING ||
       task.status === STATUS.REJECTED ||

@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { BRAND_GROUPS, unifyBrand } from "@/lib/brands";
 import { FASES, FASE_LABEL, getFase, type Fase } from "@/lib/fases";
 import type { Tables } from "@/integrations/supabase/types";
-import { ArrowLeft, FileDown, Loader2, Lock } from "lucide-react";
+import { ArrowLeft, FileDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { buildSponsorEvidencePdf } from "@/lib/buildSponsorPdf";
 import { cn } from "@/lib/utils";
 import {
   formatEntregaBogota,
-  hasRequiredEvidence,
   isStandRecepcion,
 } from "@/lib/standRecepcion";
 import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
@@ -85,6 +84,8 @@ const DEFAULT_QUESTIONS = [
 
 export default function SponsorReport() {
   const { token } = useParams<{ token: string }>();
+  const [searchParams] = useSearchParams();
+  const staffView = searchParams.get("interno") === "1";
   const navigate = useNavigate();
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -253,9 +254,7 @@ export default function SponsorReport() {
 
   useEffect(() => {
     if (sponsorName) {
-      document.title = surveyDone
-        ? `Informe — ${sponsorName} · ${eventName}`
-        : `Encuesta — ${sponsorName} · ${eventName}`;
+      document.title = `Informe — ${sponsorName} · ${eventName}`;
     }
   }, [sponsorName, eventName, surveyDone]);
 
@@ -275,21 +274,7 @@ export default function SponsorReport() {
     [activeTasks]
   );
 
-  const allComplete = useMemo(() => {
-    if (activeTasks.length === 0) return false;
-    return activeTasks.every(
-      (t) =>
-        hasRequiredEvidence({ ...t, rejected_at: null }) &&
-        (t.status === "aprobada" || t.status === "por_validar")
-    );
-  }, [activeTasks]);
-
-  const allApproved = useMemo(() => {
-    if (activeTasks.length === 0) return false;
-    return activeTasks.every(
-      (t) => hasRequiredEvidence({ ...t, rejected_at: null }) && t.status === "aprobada"
-    );
-  }, [activeTasks]);
+  const canDownloadPdf = approvedOrEvidence.length > 0;
 
   const byFase = useMemo(() => {
     const out: Record<Fase, Task[]> = {
@@ -335,16 +320,12 @@ export default function SponsorReport() {
     }
     setSavedAnswers(payload);
     setSurveyDone(true);
-    toast.success("Gracias. Ya puedes ver el informe.");
+    toast.success("Encuesta guardada");
   };
 
   const downloadPdf = async () => {
-    if (!surveyDone) {
-      toast.error("Debes completar la encuesta antes de descargar el PDF");
-      return;
-    }
-    if (!allApproved) {
-      toast.error("El PDF se habilita cuando todos los beneficios estan aprobados");
+    if (!canDownloadPdf) {
+      toast.error("Aún no hay evidencias para armar el PDF");
       return;
     }
     setPdfBusy(true);
@@ -353,10 +334,12 @@ export default function SponsorReport() {
         sponsorName,
         eventName,
         tasks: activeTasks,
-        surveyAnswers: savedAnswers.map((a) => ({
-          prompt: a.prompt,
-          value: a.value,
-        })),
+        surveyAnswers: savedAnswers.length
+          ? savedAnswers.map((a) => ({
+              prompt: a.prompt,
+              value: a.value,
+            }))
+          : undefined,
       });
       const filename = `informe_${sponsorName.replace(/\s+/g, "_")}_${eventName.replace(/\s+/g, "_")}.pdf`;
       const file = new File([blob], filename, { type: "application/pdf" });
@@ -429,143 +412,6 @@ export default function SponsorReport() {
     );
   }
 
-  // GATE DURO: sin encuesta respondida no hay informe ni PDF
-  if (!surveyDone) {
-    return (
-      <div className="min-h-screen bg-background">
-        <header className="gradient-hero text-white px-5 safe-top pb-8">
-          <div className="max-w-lg mx-auto">
-            <BackLink onBack={goHome} light />
-            <div className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-white/60 mt-4">
-              <Lock className="w-3.5 h-3.5" />
-              Colombia Tech Week
-            </div>
-            <h1 className="text-2xl font-bold mt-3">{surveyTitle || "Encuesta"}</h1>
-            <p className="text-sm text-white/75 mt-2">
-              {surveyDesc ||
-                `Antes de ver el informe de ${sponsorName}, responde esta breve encuesta.`}
-            </p>
-            <p className="text-xs text-white/55 mt-3">
-              El documento e informe permanecen bloqueados hasta que envíes la encuesta.
-            </p>
-          </div>
-        </header>
-        <main className="max-w-lg mx-auto px-5 py-6 space-y-5">
-          {questions.map((q) => {
-            const opts = parseOptions(q);
-            return (
-              <div key={q.id} className="card-task space-y-2">
-                <div className="text-sm font-semibold">
-                  {q.prompt}
-                  {q.required && <span className="text-destructive ml-1">*</span>}
-                </div>
-
-                {q.question_type === "scale" && (
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
-                        className={cn(
-                          "flex-1 py-2 rounded-xl text-sm font-bold border",
-                          answers[q.id] === n
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-card border-border"
-                        )}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {q.question_type === "scale_10" && (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-5 gap-2">
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
-                          className={cn(
-                            "py-2.5 rounded-xl text-sm font-bold border",
-                            answers[q.id] === n
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-card border-border"
-                          )}
-                        >
-                          {n}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex justify-between text-[10px] text-muted-foreground px-0.5">
-                      <span>1 · Bajo</span>
-                      <span>10 · Alto</span>
-                    </div>
-                  </div>
-                )}
-
-                {q.question_type === "yes_no" && (
-                  <div className="flex gap-2">
-                    {["Sí", "No"].map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
-                        className={cn(
-                          "flex-1 py-2 rounded-xl text-sm font-bold border",
-                          answers[q.id] === opt
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-card border-border"
-                        )}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {q.question_type === "choice" && (
-                  <div className="space-y-2">
-                    {(opts.length ? opts : ["Opción A", "Opción B"]).map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
-                        className={cn(
-                          "w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold border",
-                          answers[q.id] === opt
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-card border-border"
-                        )}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {q.question_type === "text" && (
-                  <textarea
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm min-h-[88px]"
-                    value={(answers[q.id] as string) || ""}
-                    onChange={(e) =>
-                      setAnswers((a) => ({ ...a, [q.id]: e.target.value }))
-                    }
-                  />
-                )}
-              </div>
-            );
-          })}
-          <Button className="w-full" onClick={submitSurvey} disabled={submitting}>
-            {submitting ? "Enviando…" : "Enviar encuesta y ver informe"}
-          </Button>
-        </main>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-background">
       <header className="gradient-hero text-white px-5 safe-top pb-8">
@@ -577,17 +423,19 @@ export default function SponsorReport() {
               <h1 className="text-3xl font-bold mt-1">Informe · {sponsorName}</h1>
               <p className="text-sm text-white/70 mt-2">
                 {approvedOrEvidence.length} evidencias · {activeTasks.length} beneficios
-                {allComplete ? " · Completo" : " · En progreso"}
+                {approvedOrEvidence.length === activeTasks.length && activeTasks.length > 0
+                  ? " · Completo"
+                  : " · En progreso"}
               </p>
             </div>
             <Button
               onClick={() => void downloadPdf()}
-              disabled={!allApproved || pdfBusy}
+              disabled={!canDownloadPdf || pdfBusy}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
               title={
-                allApproved
-                  ? "Descargar PDF (incluye encuesta)"
-                  : "Disponible cuando todos los beneficios estén aprobados"
+                canDownloadPdf
+                  ? "Descargar PDF"
+                  : "Disponible cuando haya al menos una evidencia"
               }
             >
               {pdfBusy ? (
@@ -602,11 +450,124 @@ export default function SponsorReport() {
       </header>
 
       <main className="max-w-3xl mx-auto px-5 py-8">
-        {!allApproved && (
+        {!canDownloadPdf && (
           <div className="mb-6 rounded-xl border border-accent/40 bg-accent/15 px-4 py-3 text-sm">
-            El PDF de entrega (encuesta + evidencias embebidas) se habilita cuando todos los
-            beneficios estén aprobados.
+            El PDF se habilita cuando haya al menos una evidencia cargada para este patrocinador.
           </div>
+        )}
+
+        {!surveyDone && !staffView && questions.length > 0 && (
+          <section className="mb-8 space-y-4">
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                {surveyTitle || "Encuesta"}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                Opcional. El PDF se puede descargar sin responder.
+              </p>
+            </div>
+            {questions.map((q) => {
+              const opts = parseOptions(q);
+              return (
+                <div key={q.id} className="card-task space-y-2">
+                  <div className="text-sm font-semibold">
+                    {q.prompt}
+                    {q.required && <span className="text-muted-foreground ml-1">(opcional)</span>}
+                  </div>
+                  {q.question_type === "scale" && (
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
+                          className={cn(
+                            "flex-1 py-2 rounded-xl text-sm font-bold border",
+                            answers[q.id] === n
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card border-border"
+                          )}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {q.question_type === "scale_10" && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-5 gap-2">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
+                            className={cn(
+                              "py-2.5 rounded-xl text-sm font-bold border",
+                              answers[q.id] === n
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "bg-card border-border"
+                            )}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {q.question_type === "yes_no" && (
+                    <div className="flex gap-2">
+                      {["Sí", "No"].map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
+                          className={cn(
+                            "flex-1 py-2 rounded-xl text-sm font-bold border",
+                            answers[q.id] === opt
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card border-border"
+                          )}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {q.question_type === "choice" && (
+                    <div className="space-y-2">
+                      {(opts.length ? opts : ["Opción A", "Opción B"]).map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
+                          className={cn(
+                            "w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold border",
+                            answers[q.id] === opt
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card border-border"
+                          )}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {q.question_type === "text" && (
+                    <textarea
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm min-h-[88px]"
+                      value={(answers[q.id] as string) || ""}
+                      onChange={(e) =>
+                        setAnswers((a) => ({ ...a, [q.id]: e.target.value }))
+                      }
+                    />
+                  )}
+                </div>
+              );
+            })}
+            <Button onClick={submitSurvey} disabled={submitting}>
+              {submitting ? "Enviando…" : "Enviar encuesta"}
+            </Button>
+          </section>
         )}
 
         <div ref={reportRef} className="space-y-8 bg-background p-2">

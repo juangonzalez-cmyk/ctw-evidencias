@@ -715,8 +715,8 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs">
-        El sponsor <strong>no puede ver ni descargar</strong> el informe hasta enviar la encuesta.
-        Las respuestas se incluyen en el PDF.
+        El PDF se puede descargar sin responder la encuesta. Si el sponsor la completa, las
+        respuestas se incluyen en el PDF.
       </div>
       <div className="card-task space-y-3">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título" />
