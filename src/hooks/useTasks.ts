@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useEvent } from "@/context/EventContext";
+import { fetchAllPages } from "@/lib/supabasePage";
 
 export type Task = Tables<"tasks">;
 
@@ -23,17 +24,18 @@ export function useTasks(responsable: string | null) {
       setLoading(false);
       return;
     }
-    const { data, error } = await supabase
-      .from("tasks")
-      .select("*")
-      .eq("event_id", event.id)
-      .eq("responsable", responsable)
-      .is("deleted_at", null)
-      .order("dia", { ascending: true })
-      .order("hora", { ascending: true })
-      .limit(2000);
+    const { data, error } = await fetchAllPages<Task>((from, to) =>
+      supabase
+        .from("tasks")
+        .select("*")
+        .eq("event_id", event.id)
+        .eq("responsable", responsable)
+        .is("deleted_at", null)
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
     if (error) console.error(error);
-    else setTasks(data ?? []);
+    else setTasks(data);
     setLoading(false);
   }, [responsable, event]);
 
@@ -69,15 +71,18 @@ export function useAllTasks() {
       setLoading(false);
       return;
     }
-    const { data, error } = await supabase
-      .from("tasks")
-      .select(
-        "id,event_id,marca,tipo_beneficio,responsable,dia,hora,fase,status,evidencia_url,evidencias,media_type,deleted_at,approved_at,rejected_at,edited_at,is_timed,speaker,stage,notas,created_at,updated_at,flujo,acta_recepcion_url,firma_nombre,entrega_ctw_at,entrega_sponsor_at,tipo_entrega,category"
-      )
-      .eq("event_id", event.id)
-      .limit(2000);
+    const { data, error } = await fetchAllPages<Task>((from, to) =>
+      supabase
+        .from("tasks")
+        .select(
+          "id,event_id,marca,tipo_beneficio,responsable,dia,hora,fase,status,evidencia_url,evidencias,media_type,deleted_at,approved_at,rejected_at,edited_at,is_timed,speaker,stage,notas,created_at,updated_at,flujo,acta_recepcion_url,firma_nombre,entrega_ctw_at,entrega_sponsor_at,tipo_entrega,category"
+        )
+        .eq("event_id", event.id)
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
     if (error) console.error(error);
-    else setTasks(data ?? []);
+    else setTasks(data);
     setLoading(false);
   }, [event]);
 

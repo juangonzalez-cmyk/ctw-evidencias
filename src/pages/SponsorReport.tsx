@@ -15,6 +15,7 @@ import {
 } from "@/lib/standRecepcion";
 import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
 import { isLinkEvidence, linkDisplayHost } from "@/lib/upload";
+import { fetchAllPages } from "@/lib/supabasePage";
 
 type Task = Tables<"tasks">;
 type Question = Tables<"survey_questions">;
@@ -142,12 +143,16 @@ export default function SponsorReport() {
         .maybeSingle();
       if (ev) setEventName(ev.short_name || ev.name);
 
-      const { data: taskRows } = await supabase
-        .from("tasks")
-        .select("*")
-        .eq("event_id", report.event_id)
-        .is("deleted_at", null)
-        .limit(2000);
+      const { data: taskRows, error: tasksErr } = await fetchAllPages<Task>((from, to) =>
+        supabase
+          .from("tasks")
+          .select("*")
+          .eq("event_id", report.event_id)
+          .is("deleted_at", null)
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
+      if (tasksErr) console.error(tasksErr);
 
       const variants = new Set(
         (BRAND_GROUPS[report.sponsor_unified_name] || [report.sponsor_unified_name]).map((v) =>

@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { unifyBrand } from "@/lib/brands";
+import { fetchAllPages } from "@/lib/supabasePage";
 import {
   FLUJO_STAND_RECEPCION,
   bogotaLocalToIso,
@@ -246,17 +247,21 @@ export async function applyPulpoCronograma(opts: {
   /** Si se pasa, solo se aplican esas entregas. */
   selectedKeys?: string[] | null;
 }): Promise<ApplyPulpoResult> {
-  const { data, error } = await supabase
-    .from("tasks")
-    .select(
-      "id, marca, tipo_beneficio, category, flujo, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, deleted_at, status"
-    )
-    .eq("event_id", opts.eventId)
-    .is("deleted_at", null);
+  const { data, error } = await fetchAllPages<StandTaskRow>((from, to) =>
+    supabase
+      .from("tasks")
+      .select(
+        "id, marca, tipo_beneficio, category, flujo, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, deleted_at, status"
+      )
+      .eq("event_id", opts.eventId)
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 
   if (error) throw error;
 
-  const matches = matchPulpoCronograma((data ?? []) as StandTaskRow[]);
+  const matches = matchPulpoCronograma(data);
   const selected =
     opts.selectedKeys == null
       ? null

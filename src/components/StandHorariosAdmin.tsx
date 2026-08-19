@@ -17,6 +17,7 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/standRecepcion";
 import { unifyBrand } from "@/lib/brands";
+import { fetchAllPages } from "@/lib/supabasePage";
 
 type StandRow = {
   id: string;
@@ -68,15 +69,19 @@ export function StandHorariosAdmin({ eventId }: { eventId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select(
-          "id, marca, tipo_beneficio, category, flujo, responsable, status, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, deleted_at"
-        )
-        .eq("event_id", eventId)
-        .is("deleted_at", null);
+      const { data, error } = await fetchAllPages<StandRow>((from, to) =>
+        supabase
+          .from("tasks")
+          .select(
+            "id, marca, tipo_beneficio, category, flujo, responsable, status, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, deleted_at"
+          )
+          .eq("event_id", eventId)
+          .is("deleted_at", null)
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       if (error) throw error;
-      const stands = ((data ?? []) as StandRow[]).filter((t) => isStandRecepcion(t));
+      const stands = data.filter((t) => isStandRecepcion(t));
       stands.sort((a, b) => {
         const ta = a.entrega_ctw_at || "";
         const tb = b.entrega_ctw_at || "";

@@ -17,6 +17,7 @@ import {
   type StandTaskRow,
 } from "@/lib/applyPulpoCronograma";
 import { formatEntregaBogota } from "@/lib/standRecepcion";
+import { fetchAllPages } from "@/lib/supabasePage";
 import { StandHorariosAdmin } from "@/components/StandHorariosAdmin";
 
 type Question = Tables<"survey_questions">;
@@ -191,15 +192,19 @@ function PulpoCronogramaAdmin({ eventId }: { eventId: string }) {
   const loadPreview = async () => {
     setPreviewBusy(true);
     try {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select(
-          "id, marca, tipo_beneficio, category, flujo, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, deleted_at"
-        )
-        .eq("event_id", eventId)
-        .is("deleted_at", null);
+      const { data, error } = await fetchAllPages<StandTaskRow>((from, to) =>
+        supabase
+          .from("tasks")
+          .select(
+            "id, marca, tipo_beneficio, category, flujo, evidencia_url, acta_recepcion_url, entrega_ctw_at, entrega_sponsor_at, deleted_at"
+          )
+          .eq("event_id", eventId)
+          .is("deleted_at", null)
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       if (error) throw error;
-      const rows = matchPulpoCronograma((data ?? []) as StandTaskRow[]);
+      const rows = matchPulpoCronograma(data);
       setPreview(rows);
       // Por defecto: solo matches existentes (nunca crear faltantes sin check explícito)
       setSelected(

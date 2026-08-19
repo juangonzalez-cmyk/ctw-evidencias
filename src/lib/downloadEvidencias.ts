@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllPages } from "@/lib/supabasePage";
 
 interface TaskRow {
   id: string;
@@ -69,17 +70,19 @@ export async function downloadAllEvidencias(
 
   emit({ message: "Consultando evidencias…", phase: "preparing" });
 
-  // 1. Fetch tasks with evidence
-  let q = supabase
-    .from("tasks")
-    .select("id, marca, tipo_beneficio, dia, stage, evidencia_url, fase")
-    .not("evidencia_url", "is", null)
-    .is("rejected_at", null)
-    .is("deleted_at", null)
-    .limit(2000);
-  if (options.eventId) q = q.eq("event_id", options.eventId);
-  if (options.fase) q = q.eq("fase", options.fase);
-  const { data: tasks, error } = await q;
+  const { data: tasks, error } = await fetchAllPages<TaskRow>((from, to) => {
+    let q = supabase
+      .from("tasks")
+      .select("id, marca, tipo_beneficio, dia, stage, evidencia_url, fase")
+      .not("evidencia_url", "is", null)
+      .is("rejected_at", null)
+      .is("deleted_at", null)
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (options.eventId) q = q.eq("event_id", options.eventId);
+    if (options.fase) q = q.eq("fase", options.fase);
+    return q;
+  });
 
   if (error) throw new Error(`Error consultando tareas: ${error.message}`);
   if (!tasks || tasks.length === 0) throw new Error("No hay evidencias para descargar.");
