@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAllTasks, STATUS, type Task } from "@/hooks/useTasks";
 import { TaskCard } from "./TaskCard";
 import { unifyBrand } from "@/lib/brands";
@@ -34,8 +34,12 @@ interface Props {
 }
 
 type ViewMode = "lista" | "tarjetas";
+type KamScope = "portfolio" | "mine";
+type EvidenceFilter = "all" | "pending" | "done";
 
 const VIEW_KEY = "ctw-field-sponsors-view";
+const SCOPE_KEY = "ctw-kam-scope";
+const EVID_KEY = "ctw-kam-evidence-filter";
 
 function loadViewMode(): ViewMode {
   try {
@@ -45,6 +49,55 @@ function loadViewMode(): ViewMode {
     /* ignore */
   }
   return "lista";
+}
+
+function loadKamScope(): KamScope {
+  try {
+    const v = localStorage.getItem(SCOPE_KEY);
+    if (v === "portfolio" || v === "mine") return v;
+  } catch {
+    /* ignore */
+  }
+  return "mine";
+}
+
+function loadEvidenceFilter(): EvidenceFilter {
+  try {
+    const v = localStorage.getItem(EVID_KEY);
+    if (v === "all" || v === "pending" || v === "done") return v;
+  } catch {
+    /* ignore */
+  }
+  return "all";
+}
+
+function taskHasSupport(t: Task) {
+  return hasRequiredEvidence({ ...t, rejected_at: null });
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "px-2.5 py-1 text-[11px] font-semibold rounded-full border transition-colors",
+        active
+          ? "bg-primary text-primary-foreground border-primary"
+          : "bg-card text-muted-foreground border-border hover:bg-muted"
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 function statusPriority(t: Task): number {
@@ -73,6 +126,8 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
   const [reportTokens, setReportTokens] = useState<Record<string, string>>({});
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const [kamScope, setKamScope] = useState<KamScope>(loadKamScope);
+  const [evidenceFilter, setEvidenceFilter] = useState<EvidenceFilter>(loadEvidenceFilter);
 
   const active = useMemo(() => allTasks.filter((t) => !t.deleted_at), [allTasks]);
 
@@ -84,10 +139,31 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
     return set;
   }, [active, responsable]);
 
-  const tasks = useMemo(() => {
+  const portfolioTasks = useMemo(() => {
     if (!kamView) return active.filter((t) => t.responsable === responsable);
     return active.filter((t) => portfolioBrands.has(unifyBrand(t.marca)));
   }, [active, kamView, responsable, portfolioBrands]);
+
+  const scopedTasks = useMemo(() => {
+    if (!kamView || kamScope !== "mine") return portfolioTasks;
+    return portfolioTasks.filter((t) => t.responsable === responsable);
+  }, [kamView, kamScope, portfolioTasks, responsable]);
+
+  const tasks = useMemo(() => {
+    if (evidenceFilter === "pending") return scopedTasks.filter((t) => !taskHasSupport(t));
+    if (evidenceFilter === "done") return scopedTasks.filter((t) => taskHasSupport(t));
+    return scopedTasks;
+  }, [scopedTasks, evidenceFilter]);
+
+  const fullBySponsor = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const t of portfolioTasks) {
+      const key = unifyBrand(t.marca);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(t);
+    }
+    return map;
+  }, [portfolioTasks]);
 
   useEffect(() => {
     try {
@@ -97,10 +173,18 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
     }
   }, [viewMode]);
 
-  const completed = useMemo(
-    () => tasks.filter((t) => hasRequiredEvidence({ ...t, rejected_at: null })).length,
-    [tasks]
-  );
+  useEffect(() => {
+    if (!kamView) return;
+    try {
+      localStorage.setItem(SCOPE_KEY, kamScope);
+      localStorage.setItem(EVID_KEY, evidenceFilter);
+    } catch {
+      /* ignore */
+    }
+  }, [kamView, kamScope, evidenceFilter]);
+
+  const completed = useMemo(() => scopedTasks.filter((t) => taskHasSupport(t)).length, [scopedTasks]);
+  const pendingCount = scopedTasks.length - completed;
 
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -124,9 +208,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
     const groupedEntries: [string, Task[]][] = [];
     for (const [sponsor, list] of map.entries()) {
       list.sort((a, b) => {
-        const ev =
-          Number(hasRequiredEvidence({ ...b, rejected_at: null })) -
-          Number(hasRequiredEvidence({ ...a, rejected_at: null }));
+        const ev = Number(taskHasSupport(b)) - Number(taskHasSupport(a));
         if (ev !== 0) return ev;
         const p = statusPriority(a) - statusPriority(b);
         if (p !== 0) return p;
@@ -228,7 +310,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
     );
   }
 
-  if (tasks.length === 0) {
+  if (portfolioTasks.length === 0) {
     return (
       <div className="p-6 text-center text-muted-foreground text-sm">
         No hay tareas asignadas todavía.
@@ -287,7 +369,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
 
   const renderSponsorGroup = (sponsor: string, items: Task[], asCard: boolean) => {
     const open = isOpen(sponsor);
-    const done = items.filter((t) => hasRequiredEvidence({ ...t, rejected_at: null })).length;
+    const done = items.filter((t) => taskHasSupport(t)).length;
     const pending = items.length - done;
 
     return (
@@ -350,8 +432,11 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
               type="button"
               size="sm"
               className="h-7 text-[10px] px-2"
-              disabled={pdfBusy === sponsor || done === 0}
-              onClick={() => void downloadReport(sponsor, items)}
+              disabled={
+                pdfBusy === sponsor ||
+                (fullBySponsor.get(sponsor) ?? items).filter((t) => taskHasSupport(t)).length === 0
+              }
+              onClick={() => void downloadReport(sponsor, fullBySponsor.get(sponsor) ?? items)}
             >
               {pdfBusy === sponsor ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -376,15 +461,20 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
-              {kamView ? "Portafolio KAM" : "Mis sponsors"}
+              {kamView
+                ? kamScope === "mine"
+                  ? "Mis beneficios"
+                  : "Portafolio KAM"
+                : "Mis sponsors"}
             </div>
             <div className="text-lg font-bold mt-0.5">
-              {grouped.length} sponsor{grouped.length === 1 ? "" : "s"} · {tasks.length}{" "}
-              beneficios
+              {grouped.length} sponsor{grouped.length === 1 ? "" : "s"} · {scopedTasks.length}{" "}
+              beneficio{scopedTasks.length === 1 ? "" : "s"}
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              {completed}/{tasks.length} con soporte cargado
-              {kamView ? " · incluye beneficios de otros roles" : ""}
+              {completed}/{scopedTasks.length} con soporte · {pendingCount} pendiente
+              {pendingCount === 1 ? "" : "s"}
+              {kamView && kamScope === "portfolio" ? " · incluye otros roles" : ""}
             </div>
           </div>
           <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
@@ -420,10 +510,42 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
           <div
             className="h-full gradient-primary transition-all"
             style={{
-              width: `${tasks.length ? (completed / tasks.length) * 100 : 0}%`,
+              width: `${scopedTasks.length ? (completed / scopedTasks.length) * 100 : 0}%`,
             }}
           />
         </div>
+        {kamView && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              <FilterChip active={kamScope === "mine"} onClick={() => setKamScope("mine")}>
+                Solo míos
+              </FilterChip>
+              <FilterChip
+                active={kamScope === "portfolio"}
+                onClick={() => setKamScope("portfolio")}
+              >
+                Portafolio
+              </FilterChip>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <FilterChip active={evidenceFilter === "all"} onClick={() => setEvidenceFilter("all")}>
+                Todos
+              </FilterChip>
+              <FilterChip
+                active={evidenceFilter === "pending"}
+                onClick={() => setEvidenceFilter("pending")}
+              >
+                Faltan ({pendingCount})
+              </FilterChip>
+              <FilterChip
+                active={evidenceFilter === "done"}
+                onClick={() => setEvidenceFilter("done")}
+              >
+                Con soporte ({completed})
+              </FilterChip>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2">
@@ -460,7 +582,13 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
 
       {grouped.length === 0 ? (
         <div className="py-10 text-center text-sm text-muted-foreground rounded-2xl border border-border bg-card">
-          Ningún sponsor coincide con “{search.trim()}”.
+          {search.trim()
+            ? `Ningún sponsor coincide con “${search.trim()}”.`
+            : evidenceFilter === "pending"
+              ? "No te faltan soportes en este filtro."
+              : evidenceFilter === "done"
+                ? "Aún no hay soportes en este filtro."
+                : "Ningún beneficio coincide con el filtro."}
         </div>
       ) : viewMode === "lista" ? (
         <>
