@@ -35,9 +35,10 @@ import {
   linkDisplayHost,
   fileExt,
   safeHttpUrl,
+  detectMediaType,
   EVIDENCIA_ACCEPT,
 } from "@/lib/upload";
-import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
+import { evidenceKindLabel, listEvidencias, newEvidenceId, type EvidenceItem } from "@/lib/evidencias";
 import { supabase } from "@/integrations/supabase/client";
 import { useEvent } from "@/context/EventContext";
 import { toast } from "sonner";
@@ -107,6 +108,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Pro
     toDatetimeLocalValue(task.entrega_sponsor_at)
   );
   const [savingTimes, setSavingTimes] = useState(false);
+  const [localEvs, setLocalEvs] = useState<EvidenceItem[]>([]);
 
   const stand = isStandRecepcion(task);
   const effectiveCtwIso = useMemo(
@@ -123,7 +125,11 @@ export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Pro
     const spIso = fromDatetimeLocalValue(sponsorLocal);
     return isSponsorMinGapMet(effectiveCtwIso, spIso);
   }, [effectiveCtwIso, sponsorLocal]);
-  const evidencias = useMemo(() => listEvidencias(task), [task]);
+  const evidencias = useMemo(() => {
+    const base = listEvidencias(task);
+    const extra = localEvs.filter((e) => !base.some((b) => b.url === e.url));
+    return [...base, ...extra];
+  }, [task, localEvs]);
   const url = task.evidencia_url || evidencias[0]?.url || "";
   const isVideo = task.media_type === "video" || (!!url && isVideoUrl(url));
   const isDoc =
@@ -152,6 +158,10 @@ export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Pro
   const standComplete = stand && isStandRecepcionComplete(task);
 
   useEffect(() => {
+    setLocalEvs([]);
+  }, [task.id]);
+
+  useEffect(() => {
     const active = document.activeElement?.getAttribute("data-stand-field");
     if (active === "ctw" || active === "sponsor") return;
     setCtwLocal(toDatetimeLocalValue(task.entrega_ctw_at));
@@ -171,7 +181,18 @@ export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Pro
       const subido = relevoOf
         ? `${uploaderName} (relevo de ${relevoOf})`
         : uploaderName;
-      await uploadEvidencia(task.id, file, subido, event?.id, task.evidencia_url);
+      const publicUrl = await uploadEvidencia(task.id, file, subido, event?.id, task.evidencia_url);
+      setLocalEvs((prev) => [
+        ...prev,
+        {
+          id: newEvidenceId(),
+          url: publicUrl,
+          kind: detectMediaType(file),
+          label: file.name,
+          added_at: new Date().toISOString(),
+          added_by: subido,
+        },
+      ]);
 
       if (mencion) {
         setSelectedBrands(task.captured_brands ?? []);
@@ -215,6 +236,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Pro
     setRemoving(true);
     try {
       await removeEvidencia(task.id, task.evidencia_url);
+      setLocalEvs([]);
       toast.success("Evidencia eliminada");
     } catch (err) {
       console.error(err);
@@ -230,6 +252,7 @@ export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Pro
     setRemoving(true);
     try {
       await removeEvidenciaItem(task.id, itemId);
+      setLocalEvs((prev) => prev.filter((e) => e.id !== itemId));
       toast.success("Soporte eliminado");
     } catch (err) {
       console.error(err);
@@ -260,7 +283,17 @@ export const TaskCard = ({ task, uploaderName, relevoOf, readOnly = false }: Pro
       const subido = relevoOf
         ? `${uploaderName} (relevo de ${relevoOf})`
         : uploaderName;
-      await saveEvidenciaLink(task.id, linkDraft, subido, task.evidencia_url);
+      const url = await saveEvidenciaLink(task.id, linkDraft, subido, task.evidencia_url);
+      setLocalEvs((prev) => [
+        ...prev,
+        {
+          id: newEvidenceId(),
+          url,
+          kind: "link",
+          added_at: new Date().toISOString(),
+          added_by: subido,
+        },
+      ]);
       toast.success(hasEvidence ? "Link agregado" : "Link guardado como evidencia");
       setShowLinkInput(false);
       setLinkDraft("");

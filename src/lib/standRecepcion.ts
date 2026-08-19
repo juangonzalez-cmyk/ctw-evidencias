@@ -29,8 +29,13 @@ export function isStandRecepcion(task: {
   return tipo.includes("stand") || cat.includes("stand");
 }
 
-export function hasPhotoEvidence(task: { evidencia_url?: string | null }): boolean {
-  return !!(task.evidencia_url && task.evidencia_url.trim());
+export function hasPhotoEvidence(task: {
+  evidencia_url?: string | null;
+  evidencias?: unknown;
+}): boolean {
+  if (task.evidencia_url && task.evidencia_url.trim()) return true;
+  const raw = task.evidencias;
+  return Array.isArray(raw) && raw.length > 0;
 }
 
 export function hasActaRecepcion(task: { acta_recepcion_url?: string | null }): boolean {
@@ -62,7 +67,7 @@ export function hasRequiredEvidence(
     | "entrega_ctw_at"
     | "entrega_sponsor_at"
     | "rejected_at"
-  >
+  > & { evidencias?: unknown; tipo_beneficio?: string | null; category?: string | null }
 ): boolean {
   if (task.rejected_at) return false;
   if (isStandRecepcion(task)) return isStandRecepcionComplete(task);

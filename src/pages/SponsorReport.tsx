@@ -14,7 +14,6 @@ import {
   isStandRecepcion,
 } from "@/lib/standRecepcion";
 import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
-import { preferCanonicalTasks } from "@/lib/benefitCapture";
 import { isLinkEvidence, linkDisplayHost } from "@/lib/upload";
 
 type Task = Tables<"tasks">;
@@ -164,7 +163,7 @@ export default function SponsorReport() {
           variants.has(u)
         );
       });
-      setTasks(preferCanonicalTasks(mine));
+      setTasks(mine);
 
       // Plantilla + preguntas (si no hay, sembrar defaults para no saltarse el gate)
       let { data: tpl } = await supabase
