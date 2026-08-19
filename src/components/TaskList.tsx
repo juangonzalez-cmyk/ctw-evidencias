@@ -25,6 +25,7 @@ import {
   staffInformePath,
 } from "@/lib/sponsorReports";
 import { hasRequiredEvidence } from "@/lib/standRecepcion";
+import { preferCanonicalTasks } from "@/lib/benefitCapture";
 
 interface Props {
   responsable: string;
@@ -121,15 +122,22 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
-    for (const list of map.values()) {
-      list.sort((a, b) => {
+    const groupedEntries: [string, Task[]][] = [];
+    for (const [sponsor, list] of map.entries()) {
+      const canonical = kamView ? preferCanonicalTasks(list) : list;
+      canonical.sort((a, b) => {
+        const ev =
+          Number(hasRequiredEvidence({ ...b, rejected_at: null })) -
+          Number(hasRequiredEvidence({ ...a, rejected_at: null }));
+        if (ev !== 0) return ev;
         const p = statusPriority(a) - statusPriority(b);
         if (p !== 0) return p;
         return (a.tipo_beneficio || "").localeCompare(b.tipo_beneficio || "", "es");
       });
+      groupedEntries.push([sponsor, canonical]);
     }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0], "es"));
-  }, [tasks, search]);
+    return groupedEntries.sort((a, b) => a[0].localeCompare(b[0], "es"));
+  }, [tasks, search, kamView]);
 
   const isOpen = (sponsor: string) => {
     if (openSponsors[sponsor] !== undefined) return !!openSponsors[sponsor];
