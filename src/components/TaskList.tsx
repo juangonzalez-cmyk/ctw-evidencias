@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAllTasks, STATUS, type Task } from "@/hooks/useTasks";
 import { TaskCard } from "./TaskCard";
+import { AddBenefitModal } from "./AddBenefitModal";
 import { unifyBrand } from "@/lib/brands";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import {
   LayoutList,
   Link2,
   Loader2,
+  Plus,
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,6 +26,7 @@ import {
   publicInformeUrl,
 } from "@/lib/sponsorReports";
 import { hasRequiredEvidence } from "@/lib/standRecepcion";
+import { isMillaExtra } from "@/lib/tipoEntrega";
 
 interface Props {
   responsable: string;
@@ -117,8 +120,8 @@ function statusChip(t: Task) {
 }
 
 export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false }: Props) => {
-  const { event } = useEvent();
-  const { tasks: allTasks, loading } = useAllTasks();
+  const { event, profiles } = useEvent();
+  const { tasks: allTasks, loading, refetch } = useAllTasks();
   const [search, setSearch] = useState("");
   const [openSponsors, setOpenSponsors] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -127,6 +130,8 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
   const [kamScope, setKamScope] = useState<KamScope>(loadKamScope);
   const [evidenceFilter, setEvidenceFilter] = useState<EvidenceFilter>(loadEvidenceFilter);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addSponsor, setAddSponsor] = useState<string | null>(null);
 
   const active = useMemo(() => allTasks.filter((t) => !t.deleted_at), [allTasks]);
 
@@ -191,6 +196,33 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
         : 0,
     [kamView, portfolioTasks, responsable]
   );
+
+  const sponsorOptions = useMemo(
+    () => Array.from(portfolioBrands).sort((a, b) => a.localeCompare(b, "es")),
+    [portfolioBrands]
+  );
+
+  const tipoOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of portfolioTasks) {
+      const label = displayBeneficioLabel(t.tipo_beneficio);
+      if (label) set.add(label);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
+  }, [portfolioTasks]);
+
+  const ownerOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of profiles) if (!p.is_coordinator && p.name) set.add(p.name);
+    for (const t of active) if (t.responsable) set.add(t.responsable);
+    set.add(responsable);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
+  }, [profiles, active, responsable]);
+
+  const openAddFor = (sponsor?: string) => {
+    setAddSponsor(sponsor || null);
+    setAddOpen(true);
+  };
 
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -338,6 +370,11 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
           <div className="flex-1 min-w-0">
             <div className="text-xs font-semibold leading-snug line-clamp-2">
               {displayBeneficioLabel(t.tipo_beneficio)}
+              {isMillaExtra(t) ? (
+                <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide text-primary">
+                  Milla extra
+                </span>
+              ) : null}
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">
               {t.is_timed && t.hora ? `${t.dia} · ${t.hora}` : null}
@@ -456,6 +493,16 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
               )}
               Generar PDF
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] px-2"
+              onClick={() => openAddFor(sponsor)}
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Beneficio
+            </Button>
           </div>
         )}
 
@@ -492,33 +539,46 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
                 : ""}
             </div>
           </div>
-          <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
-            <button
-              type="button"
-              onClick={() => setViewMode("lista")}
-              className={cn(
-                "px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1",
-                viewMode === "lista"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-muted"
-              )}
-              aria-label="Vista lista"
-            >
-              <LayoutList className="w-3.5 h-3.5" /> Lista
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("tarjetas")}
-              className={cn(
-                "px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 border-l border-border",
-                viewMode === "tarjetas"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-muted"
-              )}
-              aria-label="Vista tarjetas"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" /> Tarjetas
-            </button>
+          <div className="flex items-start gap-2 shrink-0">
+            {kamView && (
+              <Button
+                type="button"
+                size="sm"
+                className="h-9"
+                onClick={() => openAddFor()}
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Beneficio
+              </Button>
+            )}
+            <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewMode("lista")}
+                className={cn(
+                  "px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1",
+                  viewMode === "lista"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card text-muted-foreground hover:bg-muted"
+                )}
+                aria-label="Vista lista"
+              >
+                <LayoutList className="w-3.5 h-3.5" /> Lista
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("tarjetas")}
+                className={cn(
+                  "px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 border-l border-border",
+                  viewMode === "tarjetas"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card text-muted-foreground hover:bg-muted"
+                )}
+                aria-label="Vista tarjetas"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" /> Tarjetas
+              </button>
+            </div>
           </div>
         </div>
         <div className="h-2 bg-secondary rounded-full overflow-hidden">
@@ -618,6 +678,31 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {grouped.map(([sponsor, items]) => renderSponsorGroup(sponsor, items, true))}
         </div>
+      )}
+
+      {kamView && (
+        <AddBenefitModal
+          open={addOpen}
+          onClose={() => {
+            setAddOpen(false);
+            setAddSponsor(null);
+          }}
+          onCreated={() => {
+            void refetch();
+          }}
+          lockedSponsor={addSponsor}
+          defaultSponsor={addSponsor}
+          defaultFase="durante_evento"
+          tipoOptions={tipoOptions}
+          ownerOptions={ownerOptions}
+          sponsorOptions={
+            sponsorOptions.length
+              ? sponsorOptions
+              : Array.from(new Set(active.map((t) => unifyBrand(t.marca)))).sort((a, b) =>
+                  a.localeCompare(b, "es")
+                )
+          }
+        />
       )}
     </div>
   );

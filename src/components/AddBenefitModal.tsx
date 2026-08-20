@@ -27,6 +27,12 @@ import { BRAND_GROUPS } from "@/lib/brands";
 import { FASES, FASE_EMOJI, FASE_LABEL, type Fase } from "@/lib/fases";
 import { useEvent } from "@/context/EventContext";
 import { FileImage, FileVideo, FileText, X } from "lucide-react";
+import {
+  TIPO_ENTREGA_LABEL,
+  withTipoEntregaPrefix,
+  type TipoEntrega,
+} from "@/lib/tipoEntrega";
+import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 const STAGE_OPTIONS = ["Main Stage", "Industry Stage", "Workshops", "Sin stage / N/A"];
 const DIA_OPTIONS = ["Por confirmar", "Día 1", "Día 2", "Día 3"];
@@ -111,6 +117,7 @@ export const AddBenefitModal = ({
   const [speaker, setSpeaker] = useState<string>("");
   const [notas, setNotas] = useState<string>("");
   const [requiereActa, setRequiereActa] = useState(false);
+  const [tipoEntrega, setTipoEntrega] = useState<TipoEntrega>("contractual");
 
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -147,6 +154,7 @@ export const AddBenefitModal = ({
     setSpeaker("");
     setNotas("");
     setRequiereActa(false);
+    setTipoEntrega("contractual");
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -160,12 +168,18 @@ export const AddBenefitModal = ({
   const currentPredef = PREDEF.find((p) => p.key === predefKey);
 
   const buildTipoBeneficio = (): string => {
-    if (tipoMode === "existing") return existingTipo.trim();
-    if (tipoMode === "custom") return customTipo.trim();
-    if (tipoMode === "predef" && currentPredef) {
-      return currentPredef.build(predefN || currentPredef.defaultN || 1);
+    let raw = "";
+    if (tipoMode === "existing") raw = existingTipo.trim();
+    else if (tipoMode === "custom") raw = customTipo.trim();
+    else if (tipoMode === "predef" && currentPredef) {
+      raw = currentPredef.build(predefN || currentPredef.defaultN || 1);
     }
-    return "";
+    if (!raw) return "";
+    // Si el tipo existente ya trae el prefijo correcto, no lo duplicamos
+    const cleaned = displayBeneficioLabel(raw);
+    if (tipoEntrega === "adicional" && /^adicional\s*[:\-–—]/i.test(raw)) return raw;
+    if (tipoEntrega === "contractual" && /^(contrato|contractual)\s*[:\-–—]/i.test(raw)) return raw;
+    return withTipoEntregaPrefix(cleaned || raw, tipoEntrega);
   };
 
   const isDirty = (): boolean => {
@@ -289,6 +303,7 @@ export const AddBenefitModal = ({
               : "photo",
         flujo: standFlow ? "stand_recepcion" : "simple",
         category: standFlow ? "Stands" : null,
+        tipo_entrega: tipoEntrega,
       });
 
       if (insErr) {
@@ -379,6 +394,31 @@ export const AddBenefitModal = ({
             </FieldA>
 
             {/* Tipo */}
+            <FieldA label="Tipo de entrega *">
+              <div className="grid grid-cols-2 gap-2">
+                {(["contractual", "adicional"] as TipoEntrega[]).map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setTipoEntrega(opt)}
+                    className={cn(
+                      "rounded-xl border px-3 py-2.5 text-left text-xs font-semibold transition-colors",
+                      tipoEntrega === opt
+                        ? "border-primary bg-primary/15 text-foreground"
+                        : "border-border bg-card text-muted-foreground hover:bg-muted"
+                    )}
+                  >
+                    <span className="block">{TIPO_ENTREGA_LABEL[opt]}</span>
+                    <span className="block text-[10px] font-normal mt-0.5 opacity-80">
+                      {opt === "contractual"
+                        ? "Beneficio del contrato"
+                        : "Más allá del contrato"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </FieldA>
+
             <FieldA label="Tipo de beneficio *" error={errors.tipo}>
               <div className="space-y-2">
                 <select

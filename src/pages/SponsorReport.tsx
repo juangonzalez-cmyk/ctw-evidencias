@@ -1,29 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { BRAND_GROUPS, unifyBrand } from "@/lib/brands";
-import { FASES, FASE_LABEL, getFase, type Fase } from "@/lib/fases";
 import type { Tables } from "@/integrations/supabase/types";
 import { ArrowLeft, FileDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { buildSponsorEvidencePdf } from "@/lib/buildSponsorPdf";
 import { cn } from "@/lib/utils";
-import {
-  formatEntregaBogota,
-  isStandRecepcion,
-} from "@/lib/standRecepcion";
+import { formatEntregaBogota, isStandRecepcion } from "@/lib/standRecepcion";
 import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
 import { isLinkEvidence, linkDisplayHost } from "@/lib/upload";
 import { fetchAllPages } from "@/lib/supabasePage";
 import { downloadPdfFile, sanitizePdfFilename } from "@/lib/sponsorReports";
-import { displayBeneficioLabel } from "@/lib/beneficioLabel";
+import {
+  benefitTitle,
+  buildReportBuckets,
+  buildThankYouIntro,
+  FASES,
+  FASE_LABEL,
+  formatReportDateTime,
+  lastEvidenceAt,
+} from "@/lib/sponsorReportModel";
 
 type Task = Tables<"tasks">;
 type Question = Tables<"survey_questions">;
-
 type AnswerMap = Record<string, string | number>;
-
 type StoredAnswer = {
   question_id: string;
   prompt: string;
@@ -90,16 +92,14 @@ export default function SponsorReport() {
   const [searchParams] = useSearchParams();
   const staffView = searchParams.get("interno") === "1";
   const navigate = useNavigate();
-  const reportRef = useRef<HTMLDivElement>(null);
-
-  const goHome = () => {
-    navigate("/", { replace: false });
-  };
 
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [sponsorName, setSponsorName] = useState("");
   const [eventName, setEventName] = useState("CTW");
+  const [eventFullName, setEventFullName] = useState("Colombia Tech Week");
+  const [startsOn, setStartsOn] = useState<string | null>(null);
+  const [endsOn, setEndsOn] = useState<string | null>(null);
   const [eventId, setEventId] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -107,7 +107,6 @@ export default function SponsorReport() {
   const [savedAnswers, setSavedAnswers] = useState<StoredAnswer[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [surveyTitle, setSurveyTitle] = useState("Encuesta de satisfacción");
-  const [surveyDesc, setSurveyDesc] = useState("");
   const [answers, setAnswers] = useState<AnswerMap>({});
   const [submitting, setSubmitting] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -140,10 +139,15 @@ export default function SponsorReport() {
 
       const { data: ev } = await supabase
         .from("events")
-        .select("name, short_name")
+        .select("name, short_name, starts_on, ends_on")
         .eq("id", report.event_id)
         .maybeSingle();
-      if (ev) setEventName(ev.short_name || ev.name);
+      if (ev) {
+        setEventName(ev.short_name || ev.name);
+        setEventFullName(ev.name);
+        setStartsOn(ev.starts_on);
+        setEndsOn(ev.ends_on);
+      }
 
       const { data: taskRows, error: tasksErr } = await fetchAllPages<Task>((from, to) =>
         supabase
@@ -158,10 +162,10 @@ export default function SponsorReport() {
 
       const unified = unifyBrand(report.sponsor_unified_name);
       const variants = new Set(
-        (BRAND_GROUPS[unified] || BRAND_GROUPS[report.sponsor_unified_name] || [
-          report.sponsor_unified_name,
-          unified,
-        ]).map((v) => v.trim().toLowerCase())
+        (
+          BRAND_GROUPS[unified] ||
+          BRAND_GROUPS[report.sponsor_unified_name] || [report.sponsor_unified_name, unified]
+        ).map((v) => v.trim().toLowerCase())
       );
       variants.add(unified.trim().toLowerCase());
       variants.add(report.sponsor_unified_name.trim().toLowerCase());
@@ -172,7 +176,6 @@ export default function SponsorReport() {
       });
       setTasks(mine);
 
-      // Plantilla + preguntas (si no hay, sembrar defaults para no saltarse el gate)
       let { data: tpl } = await supabase
         .from("survey_templates")
         .select("*")
@@ -186,8 +189,7 @@ export default function SponsorReport() {
           .insert({
             event_id: report.event_id,
             title: "Encuesta de satisfacción",
-            description:
-              "Antes de ver el informe de evidencias debes completar esta encuesta.",
+            description: "Opcional. Cuéntanos tu experiencia como sponsor.",
             active: true,
           })
           .select("*")
@@ -197,11 +199,6 @@ export default function SponsorReport() {
 
       if (tpl) {
         setSurveyTitle(tpl.title);
-        setSurveyDesc(
-          tpl.description ||
-            "Antes de ver el informe de evidencias debes completar esta encuesta."
-        );
-
         let { data: qs } = await supabase
           .from("survey_questions")
           .select("*")
@@ -239,7 +236,6 @@ export default function SponsorReport() {
         const list = Array.isArray(response.answers)
           ? (response.answers as StoredAnswer[])
           : [];
-        // Solo desbloquear si hay respuestas reales (evita bypass con insert vacío)
         const hasRealAnswers = list.some(
           (a) => a && a.value !== null && a.value !== undefined && a.value !== ""
         );
@@ -260,38 +256,23 @@ export default function SponsorReport() {
   }, [token]);
 
   useEffect(() => {
-    if (sponsorName) {
-      document.title = `Informe — ${sponsorName} · ${eventName}`;
-    }
-  }, [sponsorName, eventName, surveyDone]);
+    if (sponsorName) document.title = `Informe — ${sponsorName} · ${eventName}`;
+  }, [sponsorName, eventName]);
 
-  const activeTasks = useMemo(
-    () => tasks.filter((t) => t.status !== "rechazado"),
-    [tasks]
-  );
-
-  const approvedOrEvidence = useMemo(
+  const buckets = useMemo(() => buildReportBuckets(tasks), [tasks]);
+  const thankYou = useMemo(
     () =>
-      activeTasks.filter(
-        (t) =>
-          listEvidencias(t).length > 0 ||
-          !!t.evidencia_url ||
-          (isStandRecepcion(t) && !!t.acta_recepcion_url)
-      ),
-    [activeTasks]
+      buildThankYouIntro({
+        sponsorName,
+        eventName: eventFullName || eventName,
+        startsOn,
+        endsOn,
+        withEvidenceCount: buckets.withEvidence.length,
+      }),
+    [sponsorName, eventFullName, eventName, startsOn, endsOn, buckets.withEvidence.length]
   );
-
-  const canDownloadPdf = approvedOrEvidence.length > 0;
-
-  const byFase = useMemo(() => {
-    const out: Record<Fase, Task[]> = {
-      pre_evento: [],
-      durante_evento: [],
-      post_evento: [],
-    };
-    for (const t of approvedOrEvidence) out[getFase(t)].push(t);
-    return out;
-  }, [approvedOrEvidence]);
+  const updatedAt = useMemo(() => lastEvidenceAt(buckets.active), [buckets.active]);
+  const canDownloadPdf = buckets.withEvidence.length > 0;
 
   const submitSurvey = async () => {
     if (!reportId || !eventId) return;
@@ -339,13 +320,13 @@ export default function SponsorReport() {
     try {
       const blob = await buildSponsorEvidencePdf({
         sponsorName,
-        eventName,
-        tasks: activeTasks,
+        eventName: eventFullName || eventName,
+        eventShortName: eventName,
+        startsOn,
+        endsOn,
+        tasks: buckets.active,
         surveyAnswers: savedAnswers.length
-          ? savedAnswers.map((a) => ({
-              prompt: a.prompt,
-              value: a.value,
-            }))
+          ? savedAnswers.map((a) => ({ prompt: a.prompt, value: a.value }))
           : undefined,
       });
       const filename = `informe_${sanitizePdfFilename(sponsorName)}_${sanitizePdfFilename(eventName)}.pdf`;
@@ -361,63 +342,74 @@ export default function SponsorReport() {
 
   if (loading) {
     return (
-      <div className="min-h-screen gradient-hero text-white flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[#96e631]" />
       </div>
     );
   }
 
-  const pendingTasks = activeTasks.filter(
-    (t) =>
-      listEvidencias(t).length === 0 &&
-      !t.evidencia_url &&
-      !(isStandRecepcion(t) && !!t.acta_recepcion_url)
-  );
-
   if (notFound) {
     return (
-      <div className="min-h-screen bg-background flex flex-col">
-        <div className="flex-1 flex items-center justify-center p-6">
-          <div className="max-w-md text-center">
-            <h1 className="text-2xl font-bold">Informe no encontrado</h1>
-            <p className="text-sm text-muted-foreground mt-2">
-              El link es inválido o ya no está disponible. Pide al equipo CTW un enlace nuevo.
-            </p>
-          </div>
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="max-w-md text-center">
+          <h1 className="text-2xl font-bold">Informe no encontrado</h1>
+          <p className="text-sm text-muted-foreground mt-2">
+            El link es inválido o ya no está disponible. Pide al equipo CTW un enlace nuevo.
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="gradient-hero text-white px-5 safe-top pb-8">
-        <div className="max-w-3xl mx-auto">
+    <div className="min-h-screen bg-[#0a0a0a] text-white">
+      {/* 01 Hero */}
+      <header className="relative overflow-hidden border-b border-white/10">
+        <div
+          className="absolute inset-0 opacity-90"
+          style={{
+            background:
+              "radial-gradient(ellipse at 20% 0%, #143d0f 0%, transparent 55%), radial-gradient(ellipse at 100% 100%, #1a2e0a 0%, transparent 40%), #000",
+          }}
+        />
+        <div className="relative max-w-3xl mx-auto px-5 pt-8 pb-12 safe-top">
           {staffView ? (
-            <BackLink onBack={goHome} light />
+            <button
+              type="button"
+              onClick={() => navigate("/")}
+              className="inline-flex items-center gap-1.5 text-sm text-white/70 hover:text-white mb-6"
+            >
+              <ArrowLeft className="w-4 h-4" /> Volver a la app
+            </button>
           ) : (
-            <div className="text-[11px] uppercase tracking-wider text-white/55 font-semibold">
-              Informe público · no requiere acceso a la app
+            <div className="text-[11px] uppercase tracking-[0.25em] text-[#96e631]/font-semibold mb-6">
+              Informe público · Colombia Tech Week
             </div>
           )}
-          <div className="mt-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-            <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-white/60">{eventName}</div>
-              <h1 className="text-3xl font-bold mt-1">Informe · {sponsorName}</h1>
-              <p className="text-sm text-white/70 mt-2">
-                {approvedOrEvidence.length} con evidencia · {pendingTasks.length} pendientes ·{" "}
-                {activeTasks.length} beneficios
-              </p>
-            </div>
+
+          <div className="text-[11px] uppercase tracking-[0.3em] text-white/45 font-semibold">
+            01 / Informe de sponsor
+          </div>
+          <p className="mt-6 text-lg text-white/70">Hola equipo</p>
+          <h1 className="mt-1 text-4xl sm:text-5xl font-bold tracking-tight">{sponsorName}</h1>
+          <p className="mt-3 text-sm text-white/55">
+            {eventFullName || eventName} · Colombia Tech Week
+          </p>
+
+          <div className="mt-8 space-y-3 max-w-2xl">
+            <p className="text-base leading-relaxed text-white/85">{thankYou.headline}</p>
+            <p className="text-sm leading-relaxed text-white/65">{thankYou.body}</p>
+            <p className="text-base leading-relaxed text-white font-medium pt-2">
+              {thankYou.closing}{" "}
+              <span aria-hidden>🤍</span> <span aria-hidden>🇨🇴</span>
+            </p>
+          </div>
+
+          <div className="mt-8">
             <Button
               onClick={() => void downloadPdf()}
               disabled={!canDownloadPdf || pdfBusy}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
-              title={
-                canDownloadPdf
-                  ? "Descargar PDF"
-                  : "Disponible cuando haya al menos una evidencia"
-              }
+              className="bg-[#96e631] text-black hover:bg-[#96e631]/90 font-semibold"
             >
               {pdfBusy ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -430,69 +422,64 @@ export default function SponsorReport() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-5 py-8">
-        {!canDownloadPdf && (
-          <div className="mb-6 rounded-xl border border-accent/40 bg-accent/15 px-4 py-3 text-sm">
-            El PDF se habilita cuando haya al menos una evidencia cargada para este patrocinador.
+      <main className="max-w-3xl mx-auto px-5 py-10 space-y-14">
+        {/* 02 Resumen */}
+        <section>
+          <div className="text-[11px] uppercase tracking-[0.3em] text-white/45 font-semibold mb-5">
+            02 / Resumen
           </div>
-        )}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="Con evidencia" value={String(buckets.withEvidence.length)} />
+            <StatCard label="Beneficios" value={String(buckets.active.length)} />
+            <StatCard label="Milla extra" value={String(buckets.millaExtra.length)} />
+            <StatCard
+              label="Fases"
+              value={
+                buckets.phasesCovered.length
+                  ? buckets.phasesCovered.map((f) => FASE_LABEL[f].replace(" evento", "")).join(" · ")
+                  : "—"
+              }
+              small
+            />
+          </div>
+          <p className="mt-4 text-xs text-white/40">
+            Última actualización: {formatReportDateTime(updatedAt)}
+          </p>
+        </section>
 
+        {/* Encuesta opcional */}
         {!surveyDone && !staffView && questions.length > 0 && (
-          <section className="mb-8 space-y-4">
+          <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 space-y-4">
             <div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white/50">
                 {surveyTitle || "Encuesta"}
               </h2>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-white/40 mt-1">
                 Opcional. El PDF se puede descargar sin responder.
               </p>
             </div>
             {questions.map((q) => {
               const opts = parseOptions(q);
               return (
-                <div key={q.id} className="card-task space-y-2">
-                  <div className="text-sm font-semibold">
-                    {q.prompt}
-                    {q.required && <span className="text-muted-foreground ml-1">(opcional)</span>}
-                  </div>
-                  {q.question_type === "scale" && (
-                    <div className="flex gap-2">
-                      {[1, 2, 3, 4, 5].map((n) => (
+                <div key={q.id} className="space-y-2">
+                  <div className="text-sm font-semibold text-white/90">{q.prompt}</div>
+                  {q.question_type === "scale_10" && (
+                    <div className="grid grid-cols-5 gap-2">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
                         <button
                           key={n}
                           type="button"
                           onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
                           className={cn(
-                            "flex-1 py-2 rounded-xl text-sm font-bold border",
+                            "py-2.5 rounded-xl text-sm font-bold border",
                             answers[q.id] === n
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-card border-border"
+                              ? "bg-[#96e631] text-black border-[#96e631]"
+                              : "bg-white/5 border-white/15 text-white/80"
                           )}
                         >
                           {n}
                         </button>
                       ))}
-                    </div>
-                  )}
-                  {q.question_type === "scale_10" && (
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-5 gap-2">
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                          <button
-                            key={n}
-                            type="button"
-                            onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
-                            className={cn(
-                              "py-2.5 rounded-xl text-sm font-bold border",
-                              answers[q.id] === n
-                                ? "bg-primary text-primary-foreground border-primary"
-                                : "bg-card border-border"
-                            )}
-                          >
-                            {n}
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   )}
                   {q.question_type === "yes_no" && (
@@ -505,27 +492,8 @@ export default function SponsorReport() {
                           className={cn(
                             "flex-1 py-2 rounded-xl text-sm font-bold border",
                             answers[q.id] === opt
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-card border-border"
-                          )}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {q.question_type === "choice" && (
-                    <div className="space-y-2">
-                      {(opts.length ? opts : ["Opción A", "Opción B"]).map((opt) => (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
-                          className={cn(
-                            "w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold border",
-                            answers[q.id] === opt
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-card border-border"
+                              ? "bg-[#96e631] text-black border-[#96e631]"
+                              : "bg-white/5 border-white/15"
                           )}
                         >
                           {opt}
@@ -535,167 +503,236 @@ export default function SponsorReport() {
                   )}
                   {q.question_type === "text" && (
                     <textarea
-                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm min-h-[88px]"
+                      className="w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2 text-sm min-h-[88px] text-white"
                       value={(answers[q.id] as string) || ""}
-                      onChange={(e) =>
-                        setAnswers((a) => ({ ...a, [q.id]: e.target.value }))
-                      }
+                      onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
                     />
+                  )}
+                  {(q.question_type === "scale" || q.question_type === "choice") && (
+                    <div className={q.question_type === "scale" ? "flex gap-2" : "space-y-2"}>
+                      {(q.question_type === "scale"
+                        ? [1, 2, 3, 4, 5]
+                        : opts.length
+                          ? opts
+                          : ["Opción A", "Opción B"]
+                      ).map((opt) => (
+                        <button
+                          key={String(opt)}
+                          type="button"
+                          onClick={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
+                          className={cn(
+                            "rounded-xl text-sm font-bold border",
+                            q.question_type === "scale" ? "flex-1 py-2" : "w-full text-left px-3 py-2.5",
+                            answers[q.id] === opt
+                              ? "bg-[#96e631] text-black border-[#96e631]"
+                              : "bg-white/5 border-white/15"
+                          )}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               );
             })}
-            <Button onClick={submitSurvey} disabled={submitting}>
+            <Button
+              onClick={submitSurvey}
+              disabled={submitting}
+              className="bg-[#96e631] text-black hover:bg-[#96e631]/90"
+            >
               {submitting ? "Enviando…" : "Enviar encuesta"}
             </Button>
           </section>
         )}
 
-        <div ref={reportRef} className="space-y-8 bg-background p-2">
+        {/* 03 Evidencias contractuales */}
+        <section className="space-y-8">
+          <div className="text-[11px] uppercase tracking-[0.3em] text-white/45 font-semibold">
+            03 / Evidencias entregadas
+          </div>
+
           {FASES.map((fase) => {
-            const list = byFase[fase];
+            const list = buckets.byFaseContractual[fase];
             if (!list.length) return null;
             return (
-              <section key={fase}>
-                <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                  {FASE_LABEL[fase]}
-                </h2>
-                <div className="space-y-3">
+              <div key={fase}>
+                <h2 className="text-xl font-bold mb-4 text-white">{FASE_LABEL[fase]}</h2>
+                <div className="space-y-6">
                   {list.map((t) => (
-                    <article key={t.id} className="card-task">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="font-semibold">{displayBeneficioLabel(t.tipo_beneficio)}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {t.marca}
-                            {t.dia ? ` · ${t.dia}` : ""}
-                            {t.hora ? ` · ${t.hora}` : ""}
-                          </div>
-                        </div>
-                        <span className="text-[10px] uppercase font-bold px-2 py-1 rounded-full bg-primary/15 text-foreground">
-                          {t.status}
-                        </span>
-                      </div>
-                      {listEvidencias(t).map((item) => {
-                        const itemIsLink =
-                          item.kind === "link" || isLinkEvidence(item.url, item.kind);
-                        return (
-                          <div key={item.id} className="mt-3">
-                            <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1">
-                              {evidenceKindLabel(item.kind)}
-                              {item.label ? ` · ${item.label}` : ""}
-                            </div>
-                            {/\.(mp4|webm|mov)(\?|$)/i.test(item.url) || item.kind === "video" ? (
-                              <video
-                                src={item.url}
-                                controls
-                                className="w-full rounded-xl max-h-72 bg-black"
-                              />
-                            ) : canShowAsImage(item.url) && !itemIsLink ? (
-                              <img
-                                src={item.url}
-                                alt={t.tipo_beneficio}
-                                className="w-full rounded-xl max-h-80 object-contain bg-muted/30"
-                                crossOrigin="anonymous"
-                              />
-                            ) : (
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="block rounded-xl border border-border bg-muted/40 px-3 py-3 text-xs text-primary font-semibold truncate"
-                              >
-                                {itemIsLink
-                                  ? `Abrir link · ${linkDisplayHost(item.url)}`
-                                  : item.url.includes("/evidencias/")
-                                    ? "Abrir archivo"
-                                    : `Abrir · ${item.url}`}
-                              </a>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {isStandRecepcion(t) && (
-                        <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-                          {t.acta_recepcion_url && (
-                            <img
-                              src={t.acta_recepcion_url}
-                              alt={`Acta ${t.marca}`}
-                              className="w-full rounded-xl max-h-80 object-contain bg-white border border-border"
-                              crossOrigin="anonymous"
-                            />
-                          )}
-                          <div>
-                            Firmante: {t.firma_nombre || "—"}
-                          </div>
-                          <div>
-                            Entrega CTW: {formatEntregaBogota(t.entrega_ctw_at)} · Sponsor:{" "}
-                            {formatEntregaBogota(t.entrega_sponsor_at)}
-                          </div>
-                        </div>
-                      )}
-                    </article>
+                    <EvidenceCard key={t.id} task={t} />
                   ))}
                 </div>
-              </section>
+              </div>
             );
           })}
 
-          {approvedOrEvidence.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-8">
-              Aún no hay evidencias cargadas para este sponsor.
+          {buckets.contractualWithEvidence.length === 0 && (
+            <p className="text-sm text-white/45 py-6">
+              Aún no hay evidencias contractuales cargadas para este sponsor.
             </p>
           )}
+        </section>
 
-          {pendingTasks.length > 0 && (
-            <section>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                Beneficios pendientes ({pendingTasks.length})
+        {/* Milla extra */}
+        {buckets.millaExtraWithEvidence.length > 0 && (
+          <section className="rounded-3xl border border-[#96e631]/35 bg-gradient-to-br from-[#96e631]/10 to-transparent p-6 sm:p-8 space-y-6">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.3em] text-[#96e631] font-semibold">
+                Extra / Más allá del contrato
+              </div>
+              <h2 className="mt-3 text-2xl font-bold leading-tight">
+                Desde Customer Success damos una milla extra por ti
               </h2>
-              <ul className="space-y-2">
-                {pendingTasks.map((t) => (
-                  <li
-                    key={t.id}
-                    className="rounded-xl border border-border bg-card px-3 py-2.5 flex items-start justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold">
-                        {displayBeneficioLabel(t.tipo_beneficio)}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                        {t.marca}
-                      </div>
-                    </div>
-                    <span className="text-[10px] uppercase font-bold px-2 py-1 rounded-full bg-muted text-muted-foreground shrink-0">
-                      Pendiente
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+              <p className="mt-2 text-sm text-white/60">
+                Beneficios que entregamos más allá de lo contratado.
+              </p>
+            </div>
+            <div className="space-y-6">
+              {buckets.millaExtraWithEvidence.map((t) => (
+                <EvidenceCard key={t.id} task={t} accent />
+              ))}
+            </div>
+          </section>
+        )}
 
-          <footer className="pt-6 border-t border-border text-xs text-muted-foreground text-center">
-            Generado por {eventName} · Colombia Tech Week · enlace público
-          </footer>
-        </div>
+        {/* Pendientes */}
+        {buckets.pending.length > 0 && (
+          <section>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-white/45 mb-3">
+              En progreso ({buckets.pending.length})
+            </h2>
+            <ul className="space-y-2">
+              {buckets.pending.map((t) => (
+                <li
+                  key={t.id}
+                  className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 flex items-start justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">{benefitTitle(t)}</div>
+                    <div className="text-[11px] text-white/40 mt-0.5">
+                      {isMillaExtraLabel(t) ? "Milla extra · " : ""}
+                      {t.marca}
+                    </div>
+                  </div>
+                  <span className="text-[10px] uppercase font-bold px-2 py-1 rounded-full bg-white/10 text-white/60 shrink-0">
+                    Pendiente
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <footer className="pt-8 pb-16 border-t border-white/10 text-center space-y-3">
+          <p className="text-base text-white/80 max-w-xl mx-auto leading-relaxed">
+            ¡Gracias por sumarte al sueño de poner a Colombia en el mapa por su talento, su
+            ecosistema tech y la visión de un país que adopta la tecnología con propósito!
+          </p>
+          <p className="text-xs text-white/40">
+            Generado por {eventName} · Colombia Tech Week
+            {updatedAt ? ` · Actualizado ${formatReportDateTime(updatedAt)}` : ""}
+          </p>
+        </footer>
       </main>
     </div>
   );
 }
 
-function BackLink({ onBack, light }: { onBack: () => void; light?: boolean }) {
+function isMillaExtraLabel(t: Task) {
+  const te = (t.tipo_entrega || "").toLowerCase();
+  return te === "adicional" || /^(adicional)\s*[:\-–—]/i.test(t.tipo_beneficio || "");
+}
+
+function StatCard({
+  label,
+  value,
+  small,
+}: {
+  label: string;
+  value: string;
+  small?: boolean;
+}) {
   return (
-    <button
-      type="button"
-      onClick={onBack}
+    <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-4">
+      <div className="text-[10px] uppercase tracking-wider text-white/45 font-semibold">{label}</div>
+      <div className={cn("mt-2 font-bold text-[#96e631]", small ? "text-sm leading-snug" : "text-3xl")}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function EvidenceCard({ task, accent }: { task: Task; accent?: boolean }) {
+  const items = listEvidencias(task);
+  const meta = [task.dia, task.hora, task.stage, task.speaker].filter(Boolean).join(" · ");
+
+  return (
+    <article
       className={cn(
-        "inline-flex items-center gap-1.5 text-sm font-medium transition-opacity hover:opacity-80",
-        light ? "text-white/85" : "text-muted-foreground hover:text-foreground"
+        "rounded-2xl overflow-hidden border",
+        accent ? "border-[#96e631]/25 bg-black/30" : "border-white/10 bg-white/[0.03]"
       )}
     >
-      <ArrowLeft className="w-4 h-4" />
-      Volver a la app
-    </button>
+      <div className="px-4 pt-4 pb-2">
+        <div className="font-semibold text-lg leading-snug">{benefitTitle(task)}</div>
+        {meta ? <div className="text-xs text-white/45 mt-1">{meta}</div> : null}
+      </div>
+
+      <div className="px-4 pb-4 space-y-3">
+        {items.map((item) => {
+          const itemIsLink = item.kind === "link" || isLinkEvidence(item.url, item.kind);
+          return (
+            <div key={item.id}>
+              <div className="text-[10px] uppercase font-bold text-white/40 mb-1.5">
+                {evidenceKindLabel(item.kind)}
+                {item.label ? ` · ${item.label}` : ""}
+              </div>
+              {/\.(mp4|webm|mov)(\?|$)/i.test(item.url) || item.kind === "video" ? (
+                <video src={item.url} controls className="w-full rounded-xl max-h-80 bg-black" />
+              ) : canShowAsImage(item.url) && !itemIsLink ? (
+                <img
+                  src={item.url}
+                  alt={benefitTitle(task)}
+                  className="w-full rounded-xl max-h-[28rem] object-contain bg-black/40"
+                  crossOrigin="anonymous"
+                />
+              ) : (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-xl border border-white/15 bg-white/5 px-3 py-3 text-xs text-[#96e631] font-semibold truncate"
+                >
+                  {itemIsLink
+                    ? `Abrir link · ${linkDisplayHost(item.url)}`
+                    : item.url.includes("/evidencias/")
+                      ? "Abrir archivo"
+                      : `Abrir · ${item.url}`}
+                </a>
+              )}
+            </div>
+          );
+        })}
+
+        {isStandRecepcion(task) && (
+          <div className="space-y-2 text-xs text-white/55 pt-1">
+            {task.acta_recepcion_url && (
+              <img
+                src={task.acta_recepcion_url}
+                alt={`Acta ${task.marca}`}
+                className="w-full rounded-xl max-h-80 object-contain bg-white"
+                crossOrigin="anonymous"
+              />
+            )}
+            <div>Firmante: {task.firma_nombre || "—"}</div>
+            <div>
+              Entrega CTW: {formatEntregaBogota(task.entrega_ctw_at)} · Sponsor:{" "}
+              {formatEntregaBogota(task.entrega_sponsor_at)}
+            </div>
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
