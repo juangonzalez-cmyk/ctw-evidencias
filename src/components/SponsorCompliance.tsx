@@ -285,7 +285,7 @@ export const SponsorCompliance = () => {
     const url = `${window.location.origin}/informe/${token}`;
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("Link copiado ✓ Listo para compartir con el sponsor");
+      toast.success("Link público copiado — envíalo al sponsor");
     } catch {
       toast.error("No se pudo copiar el link");
     }

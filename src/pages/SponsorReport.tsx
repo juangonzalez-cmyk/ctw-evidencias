@@ -16,6 +16,8 @@ import {
 import { evidenceKindLabel, listEvidencias } from "@/lib/evidencias";
 import { isLinkEvidence, linkDisplayHost } from "@/lib/upload";
 import { fetchAllPages } from "@/lib/supabasePage";
+import { downloadPdfFile, sanitizePdfFilename } from "@/lib/sponsorReports";
+import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 type Task = Tables<"tasks">;
 type Question = Tables<"survey_questions">;
@@ -154,19 +156,19 @@ export default function SponsorReport() {
       );
       if (tasksErr) console.error(tasksErr);
 
+      const unified = unifyBrand(report.sponsor_unified_name);
       const variants = new Set(
-        (BRAND_GROUPS[report.sponsor_unified_name] || [report.sponsor_unified_name]).map((v) =>
-          v.trim().toLowerCase()
-        )
+        (BRAND_GROUPS[unified] || BRAND_GROUPS[report.sponsor_unified_name] || [
+          report.sponsor_unified_name,
+          unified,
+        ]).map((v) => v.trim().toLowerCase())
       );
+      variants.add(unified.trim().toLowerCase());
+      variants.add(report.sponsor_unified_name.trim().toLowerCase());
       const mine = (taskRows ?? []).filter((t) => {
         const u = unifyBrand(t.marca).trim().toLowerCase();
         const raw = (t.marca || "").trim().toLowerCase();
-        return (
-          variants.has(raw) ||
-          u === report.sponsor_unified_name.trim().toLowerCase() ||
-          variants.has(u)
-        );
+        return variants.has(raw) || variants.has(u) || u === unified.trim().toLowerCase();
       });
       setTasks(mine);
 
@@ -346,39 +348,9 @@ export default function SponsorReport() {
             }))
           : undefined,
       });
-      const filename = `informe_${sponsorName.replace(/\s+/g, "_")}_${eventName.replace(/\s+/g, "_")}.pdf`;
-      const file = new File([blob], filename, { type: "application/pdf" });
-
-      // En iOS/PWA preferir share: evita que el visor de PDF reemplace la app.
-      const nav = navigator as Navigator & {
-        canShare?: (data: ShareData) => boolean;
-      };
-      if (typeof navigator.share === "function" && nav.canShare?.({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: `Informe ${sponsorName}`,
-            text: `Informe de evidencias · ${eventName}`,
-          });
-          toast.success("PDF listo para compartir");
-          return;
-        } catch (shareErr) {
-          // Usuario canceló el share → no es error
-          if ((shareErr as Error)?.name === "AbortError") return;
-        }
-      }
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Revocar un poco después para no romper descargas lentas
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      toast.success("PDF descargado — puedes seguir en esta pantalla");
+      const filename = `informe_${sanitizePdfFilename(sponsorName)}_${sanitizePdfFilename(eventName)}.pdf`;
+      downloadPdfFile(blob, filename);
+      toast.success("PDF descargado");
     } catch (e) {
       console.error(e);
       toast.error("No se pudo generar el PDF");
@@ -395,22 +367,22 @@ export default function SponsorReport() {
     );
   }
 
+  const pendingTasks = activeTasks.filter(
+    (t) =>
+      listEvidencias(t).length === 0 &&
+      !t.evidencia_url &&
+      !(isStandRecepcion(t) && !!t.acta_recepcion_url)
+  );
+
   if (notFound) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
-        <div className="px-4 pt-4 safe-top">
-          <BackLink onBack={goHome} />
-        </div>
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-md text-center">
             <h1 className="text-2xl font-bold">Informe no encontrado</h1>
             <p className="text-sm text-muted-foreground mt-2">
-              El link es inválido o ya no está disponible.
+              El link es inválido o ya no está disponible. Pide al equipo CTW un enlace nuevo.
             </p>
-            <Button className="mt-6" variant="outline" onClick={goHome}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Volver a la app
-            </Button>
           </div>
         </div>
       </div>
@@ -421,16 +393,20 @@ export default function SponsorReport() {
     <div className="min-h-screen bg-background">
       <header className="gradient-hero text-white px-5 safe-top pb-8">
         <div className="max-w-3xl mx-auto">
-          <BackLink onBack={goHome} light />
+          {staffView ? (
+            <BackLink onBack={goHome} light />
+          ) : (
+            <div className="text-[11px] uppercase tracking-wider text-white/55 font-semibold">
+              Informe público · no requiere acceso a la app
+            </div>
+          )}
           <div className="mt-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
               <div className="text-xs uppercase tracking-[0.2em] text-white/60">{eventName}</div>
               <h1 className="text-3xl font-bold mt-1">Informe · {sponsorName}</h1>
               <p className="text-sm text-white/70 mt-2">
-                {approvedOrEvidence.length} evidencias · {activeTasks.length} beneficios
-                {approvedOrEvidence.length === activeTasks.length && activeTasks.length > 0
-                  ? " · Completo"
-                  : " · En progreso"}
+                {approvedOrEvidence.length} con evidencia · {pendingTasks.length} pendientes ·{" "}
+                {activeTasks.length} beneficios
               </p>
             </div>
             <Button
@@ -589,7 +565,7 @@ export default function SponsorReport() {
                     <article key={t.id} className="card-task">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="font-semibold">{t.tipo_beneficio}</div>
+                          <div className="font-semibold">{displayBeneficioLabel(t.tipo_beneficio)}</div>
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {t.marca}
                             {t.dia ? ` · ${t.dia}` : ""}
@@ -666,13 +642,41 @@ export default function SponsorReport() {
           })}
 
           {approvedOrEvidence.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-12">
+            <p className="text-sm text-muted-foreground text-center py-8">
               Aún no hay evidencias cargadas para este sponsor.
             </p>
           )}
 
+          {pendingTasks.length > 0 && (
+            <section>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3">
+                Beneficios pendientes ({pendingTasks.length})
+              </h2>
+              <ul className="space-y-2">
+                {pendingTasks.map((t) => (
+                  <li
+                    key={t.id}
+                    className="rounded-xl border border-border bg-card px-3 py-2.5 flex items-start justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">
+                        {displayBeneficioLabel(t.tipo_beneficio)}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                        {t.marca}
+                      </div>
+                    </div>
+                    <span className="text-[10px] uppercase font-bold px-2 py-1 rounded-full bg-muted text-muted-foreground shrink-0">
+                      Pendiente
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <footer className="pt-6 border-t border-border text-xs text-muted-foreground text-center">
-            Generado por {eventName} · Colombia Tech Week
+            Generado por {eventName} · Colombia Tech Week · enlace público
           </footer>
         </div>
       </main>

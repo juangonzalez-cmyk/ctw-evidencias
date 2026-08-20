@@ -22,7 +22,6 @@ import {
   downloadSponsorPdfBlob,
   ensureSponsorReportTokens,
   publicInformeUrl,
-  staffInformePath,
 } from "@/lib/sponsorReports";
 import { hasRequiredEvidence } from "@/lib/standRecepcion";
 
@@ -268,6 +267,15 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
     };
   }, [kamView, event, kamSponsorNames]);
 
+  const openReport = (sponsor: string) => {
+    const token = reportTokens[sponsor];
+    if (!token) {
+      toast.error("Aún no hay link — recarga en unos segundos");
+      return;
+    }
+    window.open(publicInformeUrl(token), "_blank", "noopener,noreferrer");
+  };
+
   const copyReportLink = async (sponsor: string) => {
     const token = reportTokens[sponsor];
     if (!token) {
@@ -277,19 +285,10 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
     const url = publicInformeUrl(token);
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("Link del informe (para el sponsor) copiado");
+      toast.success("Link público copiado — envíalo al sponsor");
     } catch {
-      window.prompt("Copia este link del informe:", url);
+      window.prompt("Copia este link público del informe:", url);
     }
-  };
-
-  const openReport = (sponsor: string) => {
-    const token = reportTokens[sponsor];
-    if (!token) {
-      toast.error("Aún no hay link — recarga en unos segundos");
-      return;
-    }
-    window.location.assign(staffInformePath(token));
   };
 
   const downloadReport = async (sponsor: string, items: Task[]) => {
@@ -426,8 +425,8 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
               type="button"
               onClick={() => void copyReportLink(sponsor)}
               className="p-1.5 rounded-lg hover:bg-background text-muted-foreground"
-              title="Copiar link para el sponsor"
-              aria-label={`Copiar link informe ${sponsor}`}
+              title="Copiar link público para el sponsor"
+              aria-label={`Copiar link público informe ${sponsor}`}
             >
               <Link2 className="w-4 h-4" />
             </button>
@@ -438,7 +437,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
               className="h-7 text-[10px] px-2"
               onClick={() => openReport(sponsor)}
             >
-              Ver informe
+              Ver HTML
             </Button>
             <Button
               type="button"

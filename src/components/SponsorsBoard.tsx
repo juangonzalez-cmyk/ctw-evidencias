@@ -44,7 +44,7 @@ import {
 import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 import { downloadAllEvidencias, type DownloadProgress } from "@/lib/downloadEvidencias";
 import { safeHttpUrl } from "@/lib/upload";
-import { staffInformePath } from "@/lib/sponsorReports";
+import { publicInformeUrl } from "@/lib/sponsorReports";
 
 const VIEW_KEY = "ctw-coord-sponsors-view";
 type ViewMode = "lista" | "tarjetas";
@@ -152,12 +152,12 @@ export function SponsorsBoard() {
       toast.error("Aún no hay link — recarga en unos segundos");
       return;
     }
-    const url = `${window.location.origin}/informe/${token}`;
+    const url = publicInformeUrl(token);
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("Link del informe copiado");
+      toast.success("Link público copiado — envíalo al sponsor");
     } catch {
-      window.prompt("Copia este link del informe:", url);
+      window.prompt("Copia este link público del informe:", url);
     }
   };
 
@@ -167,8 +167,7 @@ export function SponsorsBoard() {
       toast.error("Aún no hay link — recarga en unos segundos");
       return;
     }
-    // Misma ventana/PWA: evita perder el contexto de la app (sin barra del navegador).
-    window.location.assign(staffInformePath(token));
+    window.open(publicInformeUrl(token), "_blank", "noopener,noreferrer");
   };
 
   const approveTask = async (task: Task) => {
@@ -461,8 +460,8 @@ export function SponsorsBoard() {
             type="button"
             onClick={() => void copyReportLink(sponsor)}
             className="p-1.5 rounded-lg hover:bg-background text-muted-foreground"
-            title="Copiar link del informe"
-            aria-label={`Copiar link informe ${sponsor}`}
+            title="Copiar link público del informe"
+            aria-label={`Copiar link público informe ${sponsor}`}
           >
             <Link2 className="w-4 h-4" />
           </button>
@@ -473,7 +472,7 @@ export function SponsorsBoard() {
             className="h-7 text-[10px] px-2 shrink-0"
             onClick={() => openReport(sponsor)}
           >
-            Informe
+            Ver HTML
           </Button>
         </div>
 

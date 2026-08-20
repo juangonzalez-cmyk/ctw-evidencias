@@ -1,13 +1,32 @@
+import { saveAs } from "file-saver";
 import { supabase } from "@/integrations/supabase/client";
 import type { Task } from "@/hooks/useTasks";
 import { buildSponsorEvidencePdf } from "@/lib/buildSponsorPdf";
 
+/** Vista interna del equipo (misma URL pública + flag). */
 export function staffInformePath(token: string): string {
   return `/informe/${token}?interno=1`;
 }
 
+/** Link enviable al sponsor: HTML público, sin login ni perfil. */
 export function publicInformeUrl(token: string): string {
   return `${window.location.origin}/informe/${token}`;
+}
+
+export function sanitizePdfFilename(name: string): string {
+  return name.replace(/[/\\?%*:|"<>]/g, "_").replace(/\s+/g, "_").slice(0, 120);
+}
+
+/**
+ * Descarga un PDF como archivo. No usa Web Share (evita el “elegir cómo abrir”).
+ */
+export function downloadPdfFile(blob: Blob, filename: string): void {
+  const safe = filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
+  const pdfBlob =
+    blob.type === "application/pdf"
+      ? blob
+      : new Blob([blob], { type: "application/pdf" });
+  saveAs(pdfBlob, safe);
 }
 
 export async function ensureSponsorReportTokens(
@@ -49,30 +68,6 @@ export async function downloadSponsorPdfBlob(opts: {
     eventName: opts.eventName,
     tasks: opts.tasks,
   });
-  const filename = `informe_${opts.sponsorName.replace(/\s+/g, "_")}_${opts.eventName.replace(/\s+/g, "_")}.pdf`;
-  const file = new File([blob], filename, { type: "application/pdf" });
-  const nav = navigator as Navigator & {
-    canShare?: (data: ShareData) => boolean;
-  };
-  if (typeof navigator.share === "function" && nav.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({
-        files: [file],
-        title: `Informe ${opts.sponsorName}`,
-        text: `Informe de evidencias · ${opts.eventName}`,
-      });
-      return;
-    } catch (shareErr) {
-      if ((shareErr as Error)?.name === "AbortError") return;
-    }
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  const filename = `informe_${sanitizePdfFilename(opts.sponsorName)}_${sanitizePdfFilename(opts.eventName)}.pdf`;
+  downloadPdfFile(blob, filename);
 }
