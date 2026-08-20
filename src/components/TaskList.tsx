@@ -328,7 +328,10 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
     try {
       await downloadSponsorPdfBlob({
         sponsorName: sponsor,
-        eventName: event?.short_name || event?.name || "CTW",
+        eventName: event?.name || event?.short_name || "CTW",
+        eventShortName: event?.short_name || event?.name || "CTW",
+        startsOn: event?.starts_on,
+        endsOn: event?.ends_on,
         tasks: items,
       });
       toast.success("Informe generado");

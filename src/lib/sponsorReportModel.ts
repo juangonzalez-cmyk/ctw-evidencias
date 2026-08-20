@@ -58,9 +58,15 @@ export function buildThankYouIntro(opts: {
       ? `${formatReportDate(opts.startsOn)} – ${formatReportDate(opts.endsOn)}`
       : formatReportDate(opts.startsOn || opts.endsOn) || opts.eventName;
 
-  const headline = `Este es el informe de cierre de ${opts.eventName} · ${opts.sponsorName}${
-    range ? `, realizado ${range.startsWith("el ") || range.includes("–") ? range : `el ${range}` : ""}`
-  }.`;
+  let when = "";
+  if (range) {
+    when =
+      range.startsWith("el ") || range.includes("–")
+        ? `, realizado ${range}`
+        : `, realizado el ${range}`;
+  }
+
+  const headline = `Este es el informe de cierre de ${opts.eventName} · ${opts.sponsorName}${when}.`;
 
   const body =
     opts.withEvidenceCount > 0

@@ -61,13 +61,19 @@ export async function ensureSponsorReportTokens(
 export async function downloadSponsorPdfBlob(opts: {
   sponsorName: string;
   eventName: string;
+  eventShortName?: string;
+  startsOn?: string | null;
+  endsOn?: string | null;
   tasks: Task[];
 }): Promise<void> {
   const blob = await buildSponsorEvidencePdf({
     sponsorName: opts.sponsorName,
     eventName: opts.eventName,
+    eventShortName: opts.eventShortName,
+    startsOn: opts.startsOn,
+    endsOn: opts.endsOn,
     tasks: opts.tasks,
   });
-  const filename = `informe_${sanitizePdfFilename(opts.sponsorName)}_${sanitizePdfFilename(opts.eventName)}.pdf`;
+  const filename = `informe_${sanitizePdfFilename(opts.sponsorName)}_${sanitizePdfFilename(opts.eventShortName || opts.eventName)}.pdf`;
   downloadPdfFile(blob, filename);
 }
