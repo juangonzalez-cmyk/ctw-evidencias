@@ -11,6 +11,13 @@ import {
   lastEvidenceAt,
 } from "@/lib/sponsorReportModel";
 import { isMillaExtra } from "@/lib/tipoEntrega";
+import {
+  DEFAULT_EVENT_HIGHLIGHT_STATS,
+  EVENT_HIGHLIGHT_ACCENT_RGB,
+  EVENT_HIGHLIGHT_SUBTITLE,
+  EVENT_HIGHLIGHT_TITLE,
+} from "@/lib/eventHighlightStats";
+import { taskHasEvidence } from "@/lib/sponsorReportModel";
 
 type Task = Tables<"tasks">;
 
@@ -344,53 +351,50 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
   pdf.setFontSize(8);
   pdf.text(`Actualizado ${formatReportDateTime(updatedAt)}`, margin, pageH - 20);
 
-  // ——— Resumen ———
-  newContentPage(opts.sponsorName, `${short} · Resumen`);
+  // ——— El evento en números ———
+  newContentPage(opts.sponsorName, `${short} · ${EVENT_HIGHLIGHT_TITLE}`);
   y = 32;
   setText(MUTED);
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(8);
-  pdf.text("02  /  RESUMEN", margin, y);
+  pdf.text("02  /  EL EVENTO EN NÚMEROS", margin, y);
   y += 10;
   setText(INK);
   pdf.setFontSize(22);
-  pdf.text("Lo que entregamos", margin, y);
-  y += 12;
+  pdf.text(EVENT_HIGHLIGHT_TITLE, margin, y);
+  y += 10;
+  setText(MUTED);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  const subtitleLines = pdf.splitTextToSize(EVENT_HIGHLIGHT_SUBTITLE, contentW);
+  pdf.text(subtitleLines, margin, y);
+  y += subtitleLines.length * 5 + 10;
 
-  const stats: { label: string; value: string }[] = [
-    { label: "Evidencias", value: String(buckets.withEvidence.length) },
-    { label: "Beneficios", value: String(buckets.active.length) },
-    { label: "Milla extra", value: String(buckets.millaExtra.length) },
-    {
-      label: "Fases",
-      value: buckets.phasesCovered.length
-        ? buckets.phasesCovered.map((f) => FASE_LABEL[f].replace(" evento", "")).join(" · ")
-        : "—",
-    },
-  ];
-  const gap = 4;
-  const cardW = (contentW - gap) / 2;
-  stats.forEach((s, i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    const x = margin + col * (cardW + gap);
-    const cy = y + row * 36;
+  const statGap = 5;
+  const statW = (contentW - statGap * 2) / 3;
+  DEFAULT_EVENT_HIGHLIGHT_STATS.forEach((stat, i) => {
+    const x = margin + i * (statW + statGap);
+    const accent = EVENT_HIGHLIGHT_ACCENT_RGB[stat.accent];
     setFill(CARD);
-    pdf.roundedRect(x, cy, cardW, 32, 3, 3, "F");
-    setFill(GREEN);
-    pdf.rect(x, cy, 2.2, 32, "F");
+    pdf.roundedRect(x, y, statW, 42, 3, 3, "F");
+    setFill(accent);
+    pdf.rect(x, y, statW, 2.5, "F");
+    setText(accent);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(20);
+    pdf.text(stat.value, x + statW / 2, y + 22, { align: "center" });
     setText(MUTED);
     pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(8);
-    pdf.text(s.label.toUpperCase(), x + 8, cy + 10);
-    setText(INK);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(s.value.length > 16 ? 11 : 18);
-    const vLines = pdf.splitTextToSize(s.value, cardW - 14);
-    pdf.text(vLines, x + 8, cy + 20);
+    pdf.setFontSize(9);
+    const labelLines = pdf.splitTextToSize(stat.label, statW - 8);
+    pdf.text(labelLines, x + statW / 2, y + 32, { align: "center" });
   });
-  y += 84;
+  y += 56;
+  paintFooter();
 
+  // ——— Índice ———
+  newContentPage(opts.sponsorName, "Índice");
+  y = 32;
   setText(MUTED);
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(8);
@@ -751,7 +755,7 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
   }
 
   // ——— Milla extra ———
-  if (buckets.millaExtraWithEvidence.length) {
+  if (buckets.millaExtra.length) {
     pdf.addPage();
     setFill(BLACK);
     pdf.rect(0, 0, pageW, pageH, "F");
@@ -771,11 +775,35 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
     setText([170, 170, 170]);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(11);
-    pdf.text("Beneficios que entregamos más allá de lo contratado.", margin, 62 + mile.length * 9 + 8);
+    pdf.text(
+      `Beneficios Tailor made o adicionales (${buckets.millaExtraWithEvidence.length} con evidencia de ${buckets.millaExtra.length}).`,
+      margin,
+      62 + mile.length * 9 + 8
+    );
 
-    for (const t of buckets.millaExtraWithEvidence) {
-      globalIdx += 1;
-      await renderTaskPages(t, globalIdx, totalEv, "Milla extra");
+    let pendingY = 62 + mile.length * 9 + 18;
+    for (const t of buckets.millaExtra) {
+      if (taskHasEvidence(t)) {
+        globalIdx += 1;
+        await renderTaskPages(t, globalIdx, totalEv, "Milla extra");
+      } else {
+        if (pendingY > usableBottom - 12) {
+          pdf.addPage();
+          setFill(BLACK);
+          pdf.rect(0, 0, pageW, pageH, "F");
+          pendingY = 40;
+        }
+        setText([255, 255, 255]);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11);
+        const title = pdf.splitTextToSize(benefitTitle(t), contentW - 20);
+        pdf.text(title, margin, pendingY);
+        setText([150, 230, 49]);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(9);
+        pdf.text("Milla extra · pendiente de evidencia", margin, pendingY + title.length * 5 + 2);
+        pendingY += title.length * 5 + 14;
+      }
     }
   }
 

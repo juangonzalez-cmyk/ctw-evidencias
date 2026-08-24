@@ -33,3 +33,29 @@ export const isValidFase = (v: any): v is Fase =>
 
 export const getFase = (t: { fase?: string | null }): Fase =>
   isValidFase(t.fase) ? t.fase : "durante_evento";
+
+const CATEGORY_FASE: Record<string, Fase> = {
+  "pre evento": "pre_evento",
+  "durante evento": "durante_evento",
+  "post evento": "post_evento",
+  "ctw experiencia": "pre_evento",
+  branding: "durante_evento",
+  stands: "durante_evento",
+  speaking: "durante_evento",
+  workshop: "durante_evento",
+};
+
+/** Fase para informes: prioriza `category` (Notion) cuando el campo `fase` quedó desactualizado. */
+export function getReportFase(t: {
+  fase?: string | null;
+  category?: string | null;
+}): Fase {
+  const cat = (t.category || "").trim().toLowerCase();
+  if (cat && CATEGORY_FASE[cat]) return CATEGORY_FASE[cat];
+
+  if (cat.includes("pre")) return "pre_evento";
+  if (cat.includes("post")) return "post_evento";
+  if (cat.includes("durante")) return "durante_evento";
+
+  return getFase(t);
+}

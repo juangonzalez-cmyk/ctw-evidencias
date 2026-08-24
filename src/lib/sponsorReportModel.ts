@@ -1,5 +1,5 @@
 import type { Tables } from "@/integrations/supabase/types";
-import { FASES, FASE_LABEL, getFase, type Fase } from "@/lib/fases";
+import { FASES, FASE_LABEL, getReportFase, type Fase } from "@/lib/fases";
 import { listEvidencias } from "@/lib/evidencias";
 import { isStandRecepcion } from "@/lib/standRecepcion";
 import { isMillaExtra } from "@/lib/tipoEntrega";
@@ -70,7 +70,7 @@ export function buildThankYouIntro(opts: {
 
   const body =
     opts.withEvidenceCount > 0
-      ? `Incluye ${opts.withEvidenceCount} evidencia${opts.withEvidenceCount === 1 ? "" : "s"} de los beneficios entregados durante el evento.`
+      ? `Incluye ${opts.withEvidenceCount} evidencia${opts.withEvidenceCount === 1 ? "" : "s"} de los beneficios entregados en pre, durante y post evento.`
       : `Estamos consolidando las evidencias de tus beneficios. Este informe se actualizará a medida que avancemos.`;
 
   const closing = `Gracias, equipo ${opts.sponsorName}, por hacer este sueño posible. Gracias por unirse al objetivo de seguir poniendo a Colombia en el mapa.`;
@@ -122,7 +122,7 @@ export function buildReportBuckets(tasks: Task[]): ReportBuckets {
     post_evento: [],
   };
   for (const t of contractualWithEvidence) {
-    byFaseContractual[getFase(t)].push(t);
+    byFaseContractual[getReportFase(t)].push(t);
   }
 
   const phasesCovered = FASES.filter((f) => byFaseContractual[f].length > 0);

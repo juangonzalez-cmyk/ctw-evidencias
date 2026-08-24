@@ -288,10 +288,16 @@ export function benefitsToTasks(
   benefits: NotionImportPreview["benefits"]
 ): SeedTaskFromNotion[] {
   return benefits.map((b) => {
+    const category = (b.category || "").trim().toLowerCase();
     const modality = (b.modality || "").toLowerCase();
-    let fase = "durante_evento";
-    if (modality.includes("pre")) fase = "pre_evento";
-    if (modality.includes("post")) fase = "post_evento";
+    let fase: "pre_evento" | "durante_evento" | "post_evento" = "durante_evento";
+    if (category.includes("pre") || category === "ctw experiencia") fase = "pre_evento";
+    else if (category.includes("post")) fase = "post_evento";
+    else if (category.includes("durante")) fase = "durante_evento";
+    else {
+      if (modality.includes("pre")) fase = "pre_evento";
+      if (modality.includes("post")) fase = "post_evento";
+    }
 
     return {
       event_id: eventId,

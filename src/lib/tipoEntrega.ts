@@ -2,7 +2,10 @@ import { displayBeneficioLabel } from "@/lib/beneficioLabel";
 
 export type TipoEntrega = "contractual" | "adicional";
 
-/** Contrato vs milla extra (Notion: Contrato / Adicional). */
+const MILLA_EXTRA_PREFIX =
+  /^(adicional|upgrade|tailor\s*made|tailor-made|tailormade)\s*([:\-–—]|\s|$)/i;
+
+/** Contrato vs milla extra (Notion: Contrato / Adicional / Tailor made). */
 export function isMillaExtra(task: {
   tipo_entrega?: string | null;
   tipo_beneficio?: string | null;
@@ -10,7 +13,7 @@ export function isMillaExtra(task: {
   const te = (task.tipo_entrega || "").trim().toLowerCase();
   if (te === "adicional" || te === "milla_extra" || te === "extra") return true;
   if (te === "contractual" || te === "contrato") return false;
-  return /^(adicional|upgrade|tailor\s*made)\s*[:\-–—]/i.test(task.tipo_beneficio || "");
+  return MILLA_EXTRA_PREFIX.test((task.tipo_beneficio || "").trim());
 }
 
 export function resolveTipoEntrega(task: {

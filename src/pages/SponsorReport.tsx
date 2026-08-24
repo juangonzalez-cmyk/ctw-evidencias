@@ -21,7 +21,16 @@ import {
   FASE_LABEL,
   formatReportDateTime,
   lastEvidenceAt,
+  taskHasEvidence,
 } from "@/lib/sponsorReportModel";
+import {
+  DEFAULT_EVENT_HIGHLIGHT_STATS,
+  EVENT_HIGHLIGHT_ACCENT_HEX,
+  EVENT_HIGHLIGHT_SUBTITLE,
+  EVENT_HIGHLIGHT_TITLE,
+  type EventHighlightStat,
+} from "@/lib/eventHighlightStats";
+import { isMillaExtra } from "@/lib/tipoEntrega";
 
 type Task = Tables<"tasks">;
 type Question = Tables<"survey_questions">;
@@ -423,24 +432,19 @@ export default function SponsorReport() {
       </header>
 
       <main className="max-w-3xl mx-auto px-5 py-10 space-y-14">
-        {/* 02 Resumen */}
+        {/* 02 El evento en números */}
         <section>
           <div className="text-[11px] uppercase tracking-[0.3em] text-white/45 font-semibold mb-5">
-            02 / Resumen
+            02 / {EVENT_HIGHLIGHT_TITLE}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label="Con evidencia" value={String(buckets.withEvidence.length)} />
-            <StatCard label="Beneficios" value={String(buckets.active.length)} />
-            <StatCard label="Milla extra" value={String(buckets.millaExtra.length)} />
-            <StatCard
-              label="Fases"
-              value={
-                buckets.phasesCovered.length
-                  ? buckets.phasesCovered.map((f) => FASE_LABEL[f].replace(" evento", "")).join(" · ")
-                  : "—"
-              }
-              small
-            />
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">{EVENT_HIGHLIGHT_TITLE}</h2>
+          <p className="mt-3 text-sm text-white/60 max-w-2xl leading-relaxed">
+            {EVENT_HIGHLIGHT_SUBTITLE}
+          </p>
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {DEFAULT_EVENT_HIGHLIGHT_STATS.map((stat) => (
+              <EventHighlightCard key={stat.label} stat={stat} />
+            ))}
           </div>
           <p className="mt-4 text-xs text-white/40">
             Última actualización: {formatReportDateTime(updatedAt)}
@@ -575,7 +579,7 @@ export default function SponsorReport() {
         </section>
 
         {/* Milla extra */}
-        {buckets.millaExtraWithEvidence.length > 0 && (
+        {buckets.millaExtra.length > 0 && (
           <section className="rounded-3xl border border-[#96e631]/35 bg-gradient-to-br from-[#96e631]/10 to-transparent p-6 sm:p-8 space-y-6">
             <div>
               <div className="text-[11px] uppercase tracking-[0.3em] text-[#96e631] font-semibold">
@@ -585,25 +589,43 @@ export default function SponsorReport() {
                 Desde Customer Success damos una milla extra por ti
               </h2>
               <p className="mt-2 text-sm text-white/60">
-                Beneficios que entregamos más allá de lo contratado.
+                Beneficios Tailor made o adicionales entregados más allá de lo contratado (
+                {buckets.millaExtraWithEvidence.length} con evidencia de {buckets.millaExtra.length}).
               </p>
             </div>
             <div className="space-y-6">
-              {buckets.millaExtraWithEvidence.map((t) => (
-                <EvidenceCard key={t.id} task={t} accent />
-              ))}
+              {buckets.millaExtra.map((t) =>
+                taskHasEvidence(t) ? (
+                  <EvidenceCard key={t.id} task={t} accent />
+                ) : (
+                  <div
+                    key={t.id}
+                    className="rounded-2xl border border-[#96e631]/25 bg-black/30 px-4 py-3 flex items-start justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold">{benefitTitle(t)}</div>
+                      <div className="text-[11px] text-[#96e631]/70 mt-0.5">Milla extra · en progreso</div>
+                    </div>
+                    <span className="text-[10px] uppercase font-bold px-2 py-1 rounded-full bg-white/10 text-white/60 shrink-0">
+                      Pendiente
+                    </span>
+                  </div>
+                )
+              )}
             </div>
           </section>
         )}
 
-        {/* Pendientes */}
-        {buckets.pending.length > 0 && (
+        {/* Pendientes (contractuales sin evidencia; milla extra va en su sección) */}
+        {buckets.pending.filter((t) => !isMillaExtra(t)).length > 0 && (
           <section>
             <h2 className="text-sm font-bold uppercase tracking-wider text-white/45 mb-3">
-              En progreso ({buckets.pending.length})
+              En progreso ({buckets.pending.filter((t) => !isMillaExtra(t)).length})
             </h2>
             <ul className="space-y-2">
-              {buckets.pending.map((t) => (
+              {buckets.pending
+                .filter((t) => !isMillaExtra(t))
+                .map((t) => (
                 <li
                   key={t.id}
                   className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 flex items-start justify-between gap-3"
@@ -611,7 +633,7 @@ export default function SponsorReport() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold">{benefitTitle(t)}</div>
                     <div className="text-[11px] text-white/40 mt-0.5">
-                      {isMillaExtraLabel(t) ? "Milla extra · " : ""}
+                      {isMillaExtra(t) ? "Milla extra · " : ""}
                       {t.marca}
                     </div>
                   </div>
@@ -639,25 +661,16 @@ export default function SponsorReport() {
   );
 }
 
-function isMillaExtraLabel(t: Task) {
-  const te = (t.tipo_entrega || "").toLowerCase();
-  return te === "adicional" || /^(adicional)\s*[:\-–—]/i.test(t.tipo_beneficio || "");
-}
-
-function StatCard({
-  label,
-  value,
-  small,
-}: {
-  label: string;
-  value: string;
-  small?: boolean;
-}) {
+function EventHighlightCard({ stat }: { stat: EventHighlightStat }) {
+  const accent = EVENT_HIGHLIGHT_ACCENT_HEX[stat.accent];
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-4">
-      <div className="text-[10px] uppercase tracking-wider text-white/45 font-semibold">{label}</div>
-      <div className={cn("mt-2 font-bold text-[#96e631]", small ? "text-sm leading-snug" : "text-3xl")}>
-        {value}
+    <div className="rounded-2xl border border-white/10 bg-white/[0.04] overflow-hidden">
+      <div className="h-1" style={{ backgroundColor: accent }} />
+      <div className="px-4 py-5 text-center">
+        <div className="text-3xl sm:text-4xl font-bold tracking-tight" style={{ color: accent }}>
+          {stat.value}
+        </div>
+        <div className="mt-2 text-sm text-white/75 font-medium">{stat.label}</div>
       </div>
     </div>
   );
