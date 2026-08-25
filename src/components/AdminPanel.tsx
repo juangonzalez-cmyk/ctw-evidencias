@@ -19,6 +19,7 @@ import {
 import { formatEntregaBogota } from "@/lib/standRecepcion";
 import { fetchAllPages } from "@/lib/supabasePage";
 import { StandHorariosAdmin } from "@/components/StandHorariosAdmin";
+import { SurveyResponsesView } from "@/components/SurveyResponsesView";
 
 type Question = Tables<"survey_questions">;
 
@@ -603,6 +604,7 @@ function ProfilesAdmin({
 }
 
 function SurveyAdmin({ eventId }: { eventId: string }) {
+  const [mode, setMode] = useState<"respuestas" | "preguntas">("respuestas");
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -719,70 +721,98 @@ function SurveyAdmin({ eventId }: { eventId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs">
-        El PDF se puede descargar sin responder la encuesta. Si el sponsor la completa, las
-        respuestas se incluyen en el PDF.
-      </div>
-      <div className="card-task space-y-3">
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título" />
-        <Textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Descripción"
-          rows={3}
-        />
-        <Button onClick={saveMeta} className="w-full">
-          <Save className="w-4 h-4 mr-1" /> Guardar encuesta
-        </Button>
-      </div>
-
-      <div className="space-y-2">
-        {questions.map((q) => (
-          <div key={q.id} className="card-task flex gap-2 items-start">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium">{q.prompt}</div>
-              <div className="text-[10px] uppercase text-muted-foreground mt-1">
-                {typeLabel(q.question_type)}
-                {q.question_type === "choice" && Array.isArray(q.options) && q.options.length > 0
-                  ? ` · ${(q.options as string[]).join(" / ")}`
-                  : ""}
-              </div>
-            </div>
-            <Button size="icon" variant="ghost" onClick={() => removeQuestion(q.id)}>
-              <Trash2 className="w-4 h-4 text-destructive" />
-            </Button>
-          </div>
+      <div className="flex gap-1 p-1 rounded-xl bg-muted/80">
+        {(
+          [
+            ["respuestas", "Respuestas"],
+            ["preguntas", "Preguntas"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setMode(id)}
+            className={`flex-1 text-xs font-semibold py-2 rounded-lg transition-colors ${
+              mode === id
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
         ))}
       </div>
 
-      <div className="card-task space-y-3">
-        <Input
-          placeholder="Nueva pregunta"
-          value={newPrompt}
-          onChange={(e) => setNewPrompt(e.target.value)}
-        />
-        <select
-          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
-          value={newType}
-          onChange={(e) => setNewType(e.target.value as typeof newType)}
-        >
-          <option value="scale_10">Escala 1–10</option>
-          <option value="scale">Escala 1–5</option>
-          <option value="choice">Opción de respuesta</option>
-          <option value="yes_no">Sí / No</option>
-          <option value="text">Texto libre</option>
-        </select>
-        {newType === "choice" && (
-          <Input
-            placeholder="Opciones separadas por |  ej: Excelente|Bueno|Regular|Malo"
-            value={newOptions}
-            onChange={(e) => setNewOptions(e.target.value)}
-          />
-        )}
-        <Button onClick={addQuestion} className="w-full" variant="secondary">
-          <Plus className="w-4 h-4 mr-1" /> Agregar pregunta
-        </Button>
-      </div>
+      {mode === "respuestas" ? (
+        <SurveyResponsesView eventId={eventId} />
+      ) : (
+        <>
+          <div className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-xs">
+            El PDF se puede descargar sin responder la encuesta. Si el sponsor la completa, las
+            respuestas se incluyen en el PDF y aparecen en la pestaña Respuestas.
+          </div>
+          <div className="card-task space-y-3">
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título" />
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Descripción"
+              rows={3}
+            />
+            <Button onClick={saveMeta} className="w-full">
+              <Save className="w-4 h-4 mr-1" /> Guardar encuesta
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            {questions.map((q) => (
+              <div key={q.id} className="card-task flex gap-2 items-start">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">{q.prompt}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground mt-1">
+                    {typeLabel(q.question_type)}
+                    {q.question_type === "choice" && Array.isArray(q.options) && q.options.length > 0
+                      ? ` · ${(q.options as string[]).join(" / ")}`
+                      : ""}
+                  </div>
+                </div>
+                <Button size="icon" variant="ghost" onClick={() => removeQuestion(q.id)}>
+                  <Trash2 className="w-4 h-4 text-destructive" />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <div className="card-task space-y-3">
+            <Input
+              placeholder="Nueva pregunta"
+              value={newPrompt}
+              onChange={(e) => setNewPrompt(e.target.value)}
+            />
+            <select
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              value={newType}
+              onChange={(e) => setNewType(e.target.value as typeof newType)}
+            >
+              <option value="scale_10">Escala 1–10</option>
+              <option value="scale">Escala 1–5</option>
+              <option value="choice">Opción de respuesta</option>
+              <option value="yes_no">Sí / No</option>
+              <option value="text">Texto libre</option>
+            </select>
+            {newType === "choice" && (
+              <Input
+                placeholder="Opciones separadas por |  ej: Excelente|Bueno|Regular|Malo"
+                value={newOptions}
+                onChange={(e) => setNewOptions(e.target.value)}
+              />
+            )}
+            <Button onClick={addQuestion} className="w-full" variant="secondary">
+              <Plus className="w-4 h-4 mr-1" /> Agregar pregunta
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

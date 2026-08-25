@@ -11,6 +11,7 @@ import {
   BarChart3,
   MailWarning,
   Settings,
+  MessageSquareText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isKamName } from "@/lib/kam";
@@ -35,13 +36,23 @@ const CoordCalendar = lazy(() =>
 const AdminPanel = lazy(() =>
   import("./AdminPanel").then((m) => ({ default: m.AdminPanel }))
 );
+const SurveyResponsesView = lazy(() =>
+  import("./SurveyResponsesView").then((m) => ({ default: m.SurveyResponsesView }))
+);
 
 interface Props {
   profile: Profile;
   onChangeProfile: () => void;
 }
 
-type Tab = "sponsors" | "agenda" | "cumplimiento" | "calendario" | "pendientes" | "config";
+type Tab =
+  | "sponsors"
+  | "agenda"
+  | "cumplimiento"
+  | "calendario"
+  | "pendientes"
+  | "encuestas"
+  | "config";
 
 const TabFallback = () => (
   <div className="py-16 flex justify-center">
@@ -117,6 +128,12 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
                 label="Pendientes"
               />
               <TabBtn
+                active={tab === "encuestas"}
+                onClick={() => setTab("encuestas")}
+                icon={<MessageSquareText className="w-3.5 h-3.5" />}
+                label="Encuestas"
+              />
+              <TabBtn
                 active={tab === "config"}
                 onClick={() => setTab("config")}
                 icon={<Settings className="w-3.5 h-3.5" />}
@@ -147,6 +164,9 @@ export const Dashboard = ({ profile, onChangeProfile }: Props) => {
           {tab === "cumplimiento" && isCoord && <SponsorsBoard />}
           {tab === "calendario" && isCoord && <CoordCalendar />}
           {tab === "pendientes" && isCoord && <PendingByResponsible />}
+          {tab === "encuestas" && isCoord && event?.id && (
+            <SurveyResponsesView eventId={event.id} />
+          )}
           {tab === "config" && isCoord && <AdminPanel />}
           {tab === "agenda" && !isCoord && (
             <Agenda responsable={profile.name} uploaderName={profile.name} />

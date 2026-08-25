@@ -127,8 +127,8 @@ export const PULPO_STAND_ENTREGAS: PulpoStandEntrega[] = [
   {
     standNo: "3",
     tamaño: "3x3",
-    marca: "EA SPORTS",
-    aliases: ["EA", "EA Sports"],
+    marca: "Electronic Arts",
+    aliases: ["EA", "EA Sports", "EA SPORTS", "Electronic Arts"],
     quienEntrega: "Andrea Ortiz",
     fecha: "2026-08-11",
     hora: "14:40",

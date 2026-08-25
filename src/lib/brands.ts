@@ -13,6 +13,7 @@ export const BRAND_GROUPS: Record<string, string[]> = {
   "Semana - Dinero": ["Semana", "Dinero"],
   "Make - Celonis": ["Make", "Make-Celonis"],
   "Due Legal": ["Due Legal", "DUE LEGAL", "Duelegal", "Due Legal SAS"],
+  "Electronic Arts": ["Electronic Arts", "EA Sports", "EA SPORTS", "EA"],
 };
 
 const BRAND_LOOKUP: Record<string, string> = (() => {
