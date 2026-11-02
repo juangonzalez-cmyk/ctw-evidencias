@@ -30,6 +30,17 @@ describe("inferFaseFromName", () => {
     expect(inferFaseFromName("Base de datos de asistentes")).toBe("post_evento");
   });
 
+  it("menciones en redes sociales cuentan como pre evento", () => {
+    expect(
+      inferFaseFromName("Menciones en redes sociales de la marca patrocinadora del espacio")
+    ).toBe("pre_evento");
+  });
+
+  it("la inferencia por nombre solo aplica a GovTech (CTW no cambia)", () => {
+    expect(NOTION_SOURCES.govtech.inferFase).toBe(true);
+    expect(NOTION_SOURCES.ctw.inferFase).toBe(false);
+  });
+
   it("sin pista devuelve null (queda durante_evento)", () => {
     expect(inferFaseFromName("Speaking Slot Main Stage")).toBeNull();
   });

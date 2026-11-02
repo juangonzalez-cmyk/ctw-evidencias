@@ -97,6 +97,7 @@ const FASE_PRE_KEYWORDS = [
   "newsletter",
   "linkedin",
   "rrss",
+  "redes sociales",
   "website",
   "homepage",
   "banner en la app",
