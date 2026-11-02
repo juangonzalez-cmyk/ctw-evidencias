@@ -330,6 +330,7 @@ export const TaskList = ({ responsable, uploaderName, relevoOf, kamView = false 
         sponsorName: sponsor,
         eventName: event?.name || event?.short_name || "CTW",
         eventShortName: event?.short_name || event?.name || "CTW",
+        eventSlug: event?.slug,
         startsOn: event?.starts_on,
         endsOn: event?.ends_on,
         tasks: items,

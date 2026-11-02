@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "db:schema": "node scripts/apply-schema.mjs",
     "db:sync-notion-evidencias": "node scripts/sync-notion-evidencias.mjs",
-    "db:materialize-evidencias": "node scripts/materialize-evidencias.mjs"
+    "db:materialize-evidencias": "node scripts/materialize-evidencias.mjs",
+    "db:import-notion-govtech": "vite-node scripts/import-notion-govtech.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -12,10 +12,10 @@ import {
 } from "@/lib/sponsorReportModel";
 import { isMillaExtra } from "@/lib/tipoEntrega";
 import {
-  DEFAULT_EVENT_HIGHLIGHT_STATS,
   EVENT_HIGHLIGHT_ACCENT_RGB,
-  EVENT_HIGHLIGHT_SUBTITLE,
   EVENT_HIGHLIGHT_TITLE,
+  getEventBranding,
+  withOrgLabel,
 } from "@/lib/eventHighlightStats";
 import { taskHasEvidence } from "@/lib/sponsorReportModel";
 
@@ -37,6 +37,8 @@ export type BuildPdfOptions = {
   sponsorName: string;
   eventName: string;
   eventShortName?: string;
+  /** Slug del evento: define marca/métricas (GovTech sin "Colombia Tech Week"). */
+  eventSlug?: string | null;
   startsOn?: string | null;
   endsOn?: string | null;
   tasks: Task[];
@@ -255,6 +257,7 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
   });
   const updatedAt = lastEvidenceAt(buckets.active);
   const short = opts.eventShortName || opts.eventName;
+  const branding = getEventBranding(opts.eventSlug);
 
   const setFill = (c: [number, number, number]) => pdf.setFillColor(c[0], c[1], c[2]);
   const setText = (c: [number, number, number]) => pdf.setTextColor(c[0], c[1], c[2]);
@@ -278,7 +281,7 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
     setText([150, 150, 150]);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(7);
-    pdf.text("Colombia Tech Week · Informe de evidencias", margin, footerY);
+    pdf.text(`${branding.orgLabel ?? opts.eventName} · Informe de evidencias`, margin, footerY);
     if (pageLabel) {
       pdf.text(pageLabel, pageW - margin, footerY, { align: "right" });
     }
@@ -319,7 +322,7 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
   setText([160, 160, 160]);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(11);
-  pdf.text(`${opts.eventName}  ·  Colombia Tech Week`, margin, y);
+  pdf.text(withOrgLabel(opts.eventName, branding, "  ·  "), margin, y);
   y += 14;
 
   setFill([28, 28, 28]);
@@ -366,13 +369,13 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
   setText(MUTED);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
-  const subtitleLines = pdf.splitTextToSize(EVENT_HIGHLIGHT_SUBTITLE, contentW);
+  const subtitleLines = pdf.splitTextToSize(branding.highlightSubtitle, contentW);
   pdf.text(subtitleLines, margin, y);
   y += subtitleLines.length * 5 + 10;
 
   const statGap = 5;
   const statW = (contentW - statGap * 2) / 3;
-  DEFAULT_EVENT_HIGHLIGHT_STATS.forEach((stat, i) => {
+  branding.highlightStats.forEach((stat, i) => {
     const x = margin + i * (statW + statGap);
     const accent = EVENT_HIGHLIGHT_ACCENT_RGB[stat.accent];
     setFill(CARD);
@@ -829,7 +832,7 @@ export async function buildSponsorEvidencePdf(opts: BuildPdfOptions): Promise<Bl
   setText([140, 140, 140]);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(9);
-  pdf.text(`Generado por ${short} · Colombia Tech Week`, margin, pageH - 28);
+  pdf.text(`Generado por ${withOrgLabel(short, branding)}`, margin, pageH - 28);
   pdf.text(`Actualizado ${formatReportDateTime(updatedAt)}`, margin, pageH - 20);
 
   return pdf.output("blob");
