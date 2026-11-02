@@ -62,6 +62,7 @@ export async function downloadSponsorPdfBlob(opts: {
   sponsorName: string;
   eventName: string;
   eventShortName?: string;
+  eventSlug?: string | null;
   startsOn?: string | null;
   endsOn?: string | null;
   tasks: Task[];
@@ -70,6 +71,7 @@ export async function downloadSponsorPdfBlob(opts: {
     sponsorName: opts.sponsorName,
     eventName: opts.eventName,
     eventShortName: opts.eventShortName,
+    eventSlug: opts.eventSlug,
     startsOn: opts.startsOn,
     endsOn: opts.endsOn,
     tasks: opts.tasks,

@@ -24,10 +24,10 @@ import {
   taskHasEvidence,
 } from "@/lib/sponsorReportModel";
 import {
-  DEFAULT_EVENT_HIGHLIGHT_STATS,
   EVENT_HIGHLIGHT_ACCENT_HEX,
-  EVENT_HIGHLIGHT_SUBTITLE,
   EVENT_HIGHLIGHT_TITLE,
+  getEventBranding,
+  withOrgLabel,
   type EventHighlightStat,
 } from "@/lib/eventHighlightStats";
 import { isMillaExtra } from "@/lib/tipoEntrega";
@@ -107,6 +107,7 @@ export default function SponsorReport() {
   const [sponsorName, setSponsorName] = useState("");
   const [eventName, setEventName] = useState("CTW");
   const [eventFullName, setEventFullName] = useState("Colombia Tech Week");
+  const [eventSlug, setEventSlug] = useState<string | null>(null);
   const [startsOn, setStartsOn] = useState<string | null>(null);
   const [endsOn, setEndsOn] = useState<string | null>(null);
   const [eventId, setEventId] = useState<string | null>(null);
@@ -148,12 +149,13 @@ export default function SponsorReport() {
 
       const { data: ev } = await supabase
         .from("events")
-        .select("name, short_name, starts_on, ends_on")
+        .select("slug, name, short_name, starts_on, ends_on")
         .eq("id", report.event_id)
         .maybeSingle();
       if (ev) {
         setEventName(ev.short_name || ev.name);
         setEventFullName(ev.name);
+        setEventSlug(ev.slug ?? null);
         setStartsOn(ev.starts_on);
         setEndsOn(ev.ends_on);
       }
@@ -281,6 +283,7 @@ export default function SponsorReport() {
     [sponsorName, eventFullName, eventName, startsOn, endsOn, buckets.withEvidence.length]
   );
   const updatedAt = useMemo(() => lastEvidenceAt(buckets.active), [buckets.active]);
+  const branding = useMemo(() => getEventBranding(eventSlug), [eventSlug]);
   const canDownloadPdf = buckets.withEvidence.length > 0;
 
   const submitSurvey = async () => {
@@ -331,6 +334,7 @@ export default function SponsorReport() {
         sponsorName,
         eventName: eventFullName || eventName,
         eventShortName: eventName,
+        eventSlug,
         startsOn,
         endsOn,
         tasks: buckets.active,
@@ -392,7 +396,7 @@ export default function SponsorReport() {
             </button>
           ) : (
             <div className="text-[11px] uppercase tracking-[0.25em] text-[#96e631]/font-semibold mb-6">
-              Informe público · Colombia Tech Week
+              Informe público · {branding.orgLabel ?? (eventFullName || eventName)}
             </div>
           )}
 
@@ -402,7 +406,7 @@ export default function SponsorReport() {
           <p className="mt-6 text-lg text-white/70">Hola equipo</p>
           <h1 className="mt-1 text-4xl sm:text-5xl font-bold tracking-tight">{sponsorName}</h1>
           <p className="mt-3 text-sm text-white/55">
-            {eventFullName || eventName} · Colombia Tech Week
+            {withOrgLabel(eventFullName || eventName, branding)}
           </p>
 
           <div className="mt-8 space-y-3 max-w-2xl">
@@ -439,10 +443,10 @@ export default function SponsorReport() {
           </div>
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">{EVENT_HIGHLIGHT_TITLE}</h2>
           <p className="mt-3 text-sm text-white/60 max-w-2xl leading-relaxed">
-            {EVENT_HIGHLIGHT_SUBTITLE}
+            {branding.highlightSubtitle}
           </p>
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {DEFAULT_EVENT_HIGHLIGHT_STATS.map((stat) => (
+            {branding.highlightStats.map((stat) => (
               <EventHighlightCard key={stat.label} stat={stat} />
             ))}
           </div>
@@ -652,7 +656,7 @@ export default function SponsorReport() {
             ecosistema tech y la visión de un país que adopta la tecnología con propósito!
           </p>
           <p className="text-xs text-white/40">
-            Generado por {eventName} · Colombia Tech Week
+            Generado por {withOrgLabel(eventName, branding)}
             {updatedAt ? ` · Actualizado ${formatReportDateTime(updatedAt)}` : ""}
           </p>
         </footer>
