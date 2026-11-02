@@ -25,7 +25,29 @@ function loadEnv() {
 }
 loadEnv();
 
-const LAB_DB = "c46217e9-0d5e-4d9a-9d4f-8c50aff644c6";
+// Fuentes de Notion (LAB Beneficios) por evento.
+//   node scripts/sync-notion-evidencias.mjs                              → CTW (comportamiento original)
+//   node scripts/sync-notion-evidencias.mjs --source=govtech --event=govtech-summit-2026
+const LAB_SOURCES = {
+  ctw: { id: "c46217e9-0d5e-4d9a-9d4f-8c50aff644c6", kind: "database" },
+  govtech: { id: "3d499829-d217-8030-843b-000b03549d2b", kind: "data_source" },
+};
+const argv = Object.fromEntries(
+  process.argv
+    .slice(2)
+    .filter((a) => a.startsWith("--"))
+    .map((a) => {
+      const [k, ...v] = a.slice(2).split("=");
+      return [k, v.join("=")];
+    })
+);
+const SOURCE = argv.source || "ctw";
+const EVENT_SLUG = argv.event || null;
+const LAB = LAB_SOURCES[SOURCE];
+if (!LAB) throw new Error(`--source inválido: ${SOURCE} (usa ctw o govtech)`);
+if (SOURCE !== "ctw" && !EVENT_SLUG) {
+  throw new Error("Con --source distinto de ctw debes pasar --event=<slug> para no mezclar eventos");
+}
 const NOTION_VERSION = "2025-09-03";
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY =
@@ -59,14 +81,17 @@ async function notion(token, pathName, method = "GET", body) {
 }
 
 async function queryLabWithFiles(token) {
-  const db = await notion(token, `/databases/${LAB_DB}`);
-  const ds = db.data_sources?.[0]?.id;
+  let ds = LAB.kind === "data_source" ? LAB.id : null;
+  if (!ds) {
+    const db = await notion(token, `/databases/${LAB.id}`);
+    ds = db.data_sources?.[0]?.id;
+  }
   const pages = [];
   let cursor;
   do {
     const pathName = ds
       ? `/data_sources/${ds}/query`
-      : `/databases/${LAB_DB}/query`;
+      : `/databases/${LAB.id}/query`;
     const res = await notion(token, pathName, "POST", {
       start_cursor: cursor,
       page_size: 100,
@@ -109,16 +134,31 @@ async function main() {
   const token = resolveNotionToken();
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  console.log("Consultando Lab Beneficios (páginas con Evidencia)…");
+  let eventId = null;
+  if (EVENT_SLUG) {
+    const { data: ev, error: evErr } = await supabase
+      .from("events")
+      .select("id, name")
+      .eq("slug", EVENT_SLUG)
+      .maybeSingle();
+    if (evErr) throw evErr;
+    if (!ev) throw new Error(`No existe un evento con slug "${EVENT_SLUG}"`);
+    eventId = ev.id;
+    console.log(`Evento: ${ev.name} (${EVENT_SLUG})`);
+  }
+
+  console.log(`Consultando Lab Beneficios [${SOURCE}] (páginas con Evidencia)…`);
   const pages = await queryLabWithFiles(token);
   console.log(`Encontradas ${pages.length} páginas con evidencia en Notion`);
 
-  const { data: tasks, error } = await supabase
+  let taskQuery = supabase
     .from("tasks")
     .select("id, event_id, notion_page_id, evidencia_url, marca, tipo_beneficio")
     .not("notion_page_id", "is", null)
     .is("deleted_at", null)
     .limit(3000);
+  if (eventId) taskQuery = taskQuery.eq("event_id", eventId);
+  const { data: tasks, error } = await taskQuery;
   if (error) throw error;
 
   const byNotion = new Map();

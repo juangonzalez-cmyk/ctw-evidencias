@@ -2,8 +2,10 @@ import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   benefitsToTasks,
+  NOTION_SOURCES,
   previewNotionImport,
   type NotionImportPreview,
+  type NotionSourceKey,
 } from "@/lib/notionImport";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +43,7 @@ export function EventCreateWizard({ onDone, fullscreen }: Props) {
 
   // Step 2
   const [notionToken, setNotionToken] = useState("");
+  const [source, setSource] = useState<NotionSourceKey>("ctw");
   const [eventFilter, setEventFilter] = useState("");
   const [preview, setPreview] = useState<NotionImportPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -77,6 +80,7 @@ export function EventCreateWizard({ onDone, fullscreen }: Props) {
     try {
       const data = await previewNotionImport(notionToken.trim(), {
         eventFilter: eventFilter || null,
+        source,
       });
       // Primera carga sin filtro: mostrar opciones de evento
       if (!eventFilter && data.eventOptions.length && !preview) {
@@ -195,7 +199,7 @@ export function EventCreateWizard({ onDone, fullscreen }: Props) {
           },
           {
             template_id: tpl.id,
-            prompt: "¿Recomendarías patrocinar CTW de nuevo?",
+            prompt: `¿Recomendarías patrocinar ${event.short_name || event.name} de nuevo?`,
             question_type: "yes_no",
             sort_order: 2,
           },
@@ -312,6 +316,24 @@ export function EventCreateWizard({ onDone, fullscreen }: Props) {
               Usa un Internal Integration Token con acceso a <strong>CRM</strong> y{" "}
               <strong>Lab Beneficios</strong>. El token solo se usa para este import (no se guarda).
             </p>
+            <label className="block text-xs space-y-1">
+              <span className="text-muted-foreground">Fuente de datos en Notion</span>
+              <select
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                value={source}
+                onChange={(e) => {
+                  setSource(e.target.value as NotionSourceKey);
+                  setPreview(null);
+                  setEventFilter("");
+                }}
+              >
+                {Object.values(NOTION_SOURCES).map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <Input
               type="password"
               placeholder="secret_… o ntn_…"

@@ -26,6 +26,92 @@ export const NOTION_FIELDS = {
   },
 } as const;
 
+export type NotionSourceKey = "ctw" | "govtech";
+
+type NotionRef = { id: string; kind: "database" | "data_source" };
+
+type Fase = "pre_evento" | "durante_evento" | "post_evento";
+
+export type NotionSourceConfig = {
+  key: NotionSourceKey;
+  label: string;
+  crm: NotionRef;
+  lab: NotionRef;
+  followup: NotionRef | null;
+  fields: {
+    owner: string | null;
+    event: string | null;
+    category: string | null;
+    modality: string | null;
+    /** Propiedad date del LAB con día/hora. Si es null se usa el Deadline de Follow-up. */
+    labDate: string | null;
+  };
+  /** Si está definido, todos los beneficios de la fuente van a este responsable. */
+  fixedOwner: string | null;
+  /** La fuente no trae categoría/modalidad: la fase se infiere del nombre del beneficio. */
+  inferFase: boolean;
+};
+
+/**
+ * Fuentes de Notion por evento. "ctw" conserva el comportamiento original;
+ * "govtech" apunta a las BDs de GovTech (se consultan por data source id).
+ */
+export const NOTION_SOURCES: Record<NotionSourceKey, NotionSourceConfig> = {
+  ctw: {
+    key: "ctw",
+    label: "Colombia Tech Week / Festival",
+    crm: { id: NOTION_DATABASES.crm, kind: "database" },
+    lab: { id: NOTION_DATABASES.lab, kind: "database" },
+    followup: { id: NOTION_DATABASES.followup, kind: "database" },
+    fields: {
+      owner: NOTION_FIELDS.crm.owner,
+      event: NOTION_FIELDS.crm.event,
+      category: NOTION_FIELDS.lab.category,
+      modality: NOTION_FIELDS.lab.modality,
+      labDate: null,
+    },
+    fixedOwner: null,
+    inferFase: false,
+  },
+  govtech: {
+    key: "govtech",
+    label: "GovTech Summit 2026",
+    // 🏷️ CRM Sponsors — GovTech
+    crm: { id: "3cf99829-d217-803e-ba38-000bdcbeb758", kind: "data_source" },
+    // ✅ LAB Beneficios — GovTech 2026
+    lab: { id: "3d499829-d217-8030-843b-000b03549d2b", kind: "data_source" },
+    followup: null,
+    fields: {
+      owner: null,
+      event: null,
+      category: null,
+      modality: null,
+      labDate: "Día y hora de la intervención",
+    },
+    fixedOwner: "Nathalia Muñoz",
+    inferFase: true,
+  },
+};
+
+const FASE_PRE_KEYWORDS = [
+  "newsletter",
+  "linkedin",
+  "rrss",
+  "website",
+  "homepage",
+  "banner en la app",
+  "cartas de invitación",
+];
+const FASE_POST_KEYWORDS = ["base de datos"];
+
+/** Fase por palabras clave del nombre. null = sin pista (queda "durante_evento"). */
+export function inferFaseFromName(name: string): Fase | null {
+  const n = name.toLowerCase();
+  if (FASE_POST_KEYWORDS.some((k) => n.includes(k))) return "post_evento";
+  if (FASE_PRE_KEYWORDS.some((k) => n.includes(k))) return "pre_evento";
+  return null;
+}
+
 type NotionPage = {
   id: string;
   url?: string | null;
@@ -168,16 +254,17 @@ async function queryAll(
   return pages;
 }
 
-async function fetchDatabasePages(token: string, databaseId: string): Promise<NotionPage[]> {
+async function fetchDatabasePages(token: string, ref: NotionRef): Promise<NotionPage[]> {
+  if (ref.kind === "data_source") return queryAll(token, ref.id, true);
   try {
-    const ds = await resolveDataSourceId(token, databaseId);
-    if (ds !== databaseId) {
+    const ds = await resolveDataSourceId(token, ref.id);
+    if (ds !== ref.id) {
       return await queryAll(token, ds, true);
     }
   } catch {
     // fallback below
   }
-  return queryAll(token, databaseId, false);
+  return queryAll(token, ref.id, false);
 }
 
 export type NotionImportPreview = {
@@ -194,18 +281,22 @@ export type NotionImportPreview = {
     owner: string;
     dia: string | null;
     hora: string | null;
+    fase: Fase | null;
   }[];
   eventOptions: string[];
 };
 
 export async function previewNotionImport(
   token: string,
-  opts?: { eventFilter?: string | null }
+  opts?: { eventFilter?: string | null; source?: NotionSourceKey }
 ): Promise<NotionImportPreview> {
+  const source = NOTION_SOURCES[opts?.source ?? "ctw"];
   const [crm, lab, followup] = await Promise.all([
-    fetchDatabasePages(token, NOTION_DATABASES.crm),
-    fetchDatabasePages(token, NOTION_DATABASES.lab),
-    fetchDatabasePages(token, NOTION_DATABASES.followup).catch(() => [] as NotionPage[]),
+    fetchDatabasePages(token, source.crm),
+    fetchDatabasePages(token, source.lab),
+    source.followup
+      ? fetchDatabasePages(token, source.followup).catch(() => [] as NotionPage[])
+      : Promise.resolve([] as NotionPage[]),
   ]);
 
   // Earliest deadline per Lab benefit id
@@ -223,8 +314,11 @@ export async function previewNotionImport(
   let sponsors = crm.map((p) => ({
     id: p.id,
     name: getTitle(p, NOTION_FIELDS.crm.title) || "Sin nombre",
-    owner: getPeopleNames(p, NOTION_FIELDS.crm.owner)[0] || "Sin asignar",
-    event: getSelect(p, NOTION_FIELDS.crm.event),
+    owner:
+      source.fixedOwner ||
+      (source.fields.owner ? getPeopleNames(p, source.fields.owner)[0] : "") ||
+      "Sin asignar",
+    event: source.fields.event ? getSelect(p, source.fields.event) : null,
   }));
 
   const eventOptions = Array.from(
@@ -248,19 +342,24 @@ export async function previewNotionImport(
         return null;
       }
       if (opts?.eventFilter && !sponsor) return null;
-      const { dia, hora } = splitDateTime(deadlineByBenefit.get(p.id) || null);
+      const when = source.fields.labDate
+        ? getDateStart(p, source.fields.labDate)
+        : deadlineByBenefit.get(p.id) || null;
+      const { dia, hora } = splitDateTime(when);
+      const name = getTitle(p, NOTION_FIELDS.lab.title) || "Beneficio";
       return {
         id: p.id,
-        name: getTitle(p, NOTION_FIELDS.lab.title) || "Beneficio",
+        name,
         type: getSelect(p, NOTION_FIELDS.lab.type),
-        category: getSelect(p, NOTION_FIELDS.lab.category),
-        modality: getSelect(p, NOTION_FIELDS.lab.modality),
+        category: source.fields.category ? getSelect(p, source.fields.category) : null,
+        modality: source.fields.modality ? getSelect(p, source.fields.modality) : null,
         status: getSelect(p, NOTION_FIELDS.lab.status),
         sponsorId,
         sponsorName: sponsor?.name || "Sin sponsor",
-        owner: sponsor?.owner || "Sin asignar",
+        owner: sponsor?.owner || source.fixedOwner || "Sin asignar",
         dia,
         hora,
+        fase: source.inferFase ? inferFaseFromName(name) : null,
       };
     })
     .filter(Boolean) as NotionImportPreview["benefits"];
@@ -276,6 +375,7 @@ export type SeedTaskFromNotion = {
   responsable: string;
   notion_page_id: string;
   fase: string;
+  flujo: "simple" | "stand_recepcion";
   status: string;
   media_type: string;
   is_timed: boolean;
@@ -299,14 +399,19 @@ export function benefitsToTasks(
       if (modality.includes("post")) fase = "post_evento";
     }
 
+    if (b.fase) fase = b.fase;
+
+    const isStand = b.name.toLowerCase().includes("stand");
+
     return {
       event_id: eventId,
       marca: b.sponsorName,
       tipo_beneficio: b.type ? `${b.type}: ${b.name}` : b.name,
-      category: b.category,
+      category: b.category ?? (isStand ? "Stands" : null),
       responsable: b.owner,
       notion_page_id: b.id,
       fase,
+      flujo: isStand ? "stand_recepcion" : "simple",
       status: "pendiente",
       media_type: "photo",
       is_timed: !!(b.dia || b.hora),
